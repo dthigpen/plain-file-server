@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plain Text File Server - Example Client</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1 { color: #333; margin-bottom: 10px; }
+        h2 { color: #555; margin-bottom: 15px; font-size: 1.2em; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: 500; color: #333; }
+        input, textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        textarea { min-height: 100px; font-family: monospace; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .response {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .response.error { background: #f8d7da; border-color: #f5c6cb; color: #721c24; }
+        .response.success { background: #d4edda; border-color: #c3e6cb; color: #155724; }
+        .file-list { list-style: none; padding: 0; }
+        .file-list li {
+            padding: 8px 12px;
+            background: #f8f9fa;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .file-list li:hover { background: #e9ecef; }
+        .file-list li.selected { background: #007bff; color: white; }
+        .hidden { display: none; }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .status.authenticated { background: #d4edda; color: #155724; }
+        .status.not-authenticated { background: #f8d7da; color: #721c24; }
+        .etag-display { font-size: 12px; color: #666; margin-top: 5px; }
+        .config-section {
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .note { font-size: 12px; color: #666; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Plain Text File Server - Example Client</h1>
+        <p class="note">This is a local development tool for testing the API. Configure your server URL below.</p>
+    </div>
+
+    <div class="container config-section">
+        <h2>Server Configuration</h2>
+        <div class="form-group">
+            <label>Server URL:</label>
+            <input type="text" id="serverUrl" value="http://127.0.0.1:3000/api" placeholder="http://your-server.com/api">
+        </div>
+        <button onclick="saveConfig()">Save Configuration</button>
+    </div>
+
+    <div class="container">
+        <h2>Authentication <span id="authStatus" class="status not-authenticated">Not Authenticated</span></h2>
+        <div class="form-group">
+            <label>Username:</label>
+            <input type="text" id="username" value="admin">
+        </div>
+        <div class="form-group">
+            <label>Password:</label>
+            <input type="password" id="password" value="">
+        </div>
+        <button onclick="login()">Login</button>
+        <button onclick="logout()">Logout</button>
+    </div>
+
+    <div class="container">
+        <h2>File Operations</h2>
+        <button onclick="listFiles()">Refresh Files</button>
+        <ul id="fileList" class="file-list"></ul>
+    </div>
+
+    <div class="container">
+        <h2>Selected File</h2>
+        <div id="selectedFileInfo" class="hidden">
+            <p><strong>Path:</strong> <span id="selectedFilePath"></span></p>
+            <div class="etag-display"><strong>ETag:</strong> <span id="selectedFileETag"></span></div>
+            <div class="form-group" style="margin-top: 15px;">
+                <label>Content:</label>
+                <textarea id="fileContent"></textarea>
+            </div>
+            <button onclick="readSelectedFile()">Read File</button>
+            <button onclick="updateSelectedFile()">Update File</button>
+            <button onclick="deleteSelectedFile()">Delete File</button>
+        </div>
+        <div id="noFileSelected">
+            <p>Select a file from the list to perform operations</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Create New File</h2>
+        <div class="form-group">
+            <label>File Path:</label>
+            <input type="text" id="newFilePath" placeholder="e.g., notes/todo.txt">
+        </div>
+        <div class="form-group">
+            <label>Content:</label>
+            <textarea id="newFileContent" placeholder="File content..."></textarea>
+        </div>
+        <button onclick="createFile()">Create File</button>
+    </div>
+
+    <div class="container">
+        <h2>API Response</h2>
+        <div id="response" class="response"></div>
+    </div>
+
+    <script>
+        let API_BASE = localStorage.getItem('serverUrl') || 'http://127.0.0.1:3000/api';
+        let authToken = localStorage.getItem('authToken');
+        let selectedFile = null;
+
+        document.getElementById('serverUrl').value = API_BASE;
+
+        function updateAuthStatus() {
+            const statusEl = document.getElementById('authStatus');
+            if (authToken) {
+                statusEl.textContent = 'Authenticated';
+                statusEl.className = 'status authenticated';
+            } else {
+                statusEl.textContent = 'Not Authenticated';
+                statusEl.className = 'status not-authenticated';
+            }
+        }
+
+        function showResponse(data, isError = false) {
+            const responseEl = document.getElementById('response');
+            responseEl.textContent = JSON.stringify(data, null, 2);
+            responseEl.className = isError ? 'response error' : 'response success';
+        }
+
+        function saveConfig() {
+            API_BASE = document.getElementById('serverUrl').value;
+            localStorage.setItem('serverUrl', API_BASE);
+            showResponse({ message: 'Configuration saved' });
+        }
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    authToken = data.token;
+                    localStorage.setItem('authToken', authToken);
+                    updateAuthStatus();
+                    showResponse(data);
+                    listFiles();
+                } else {
+                    showResponse(data, true);
+                }
+            } catch (error) {
+                showResponse({ error: error.message }, true);
+            }
+        }
+
+        function logout() {
+            authToken = null;
+            localStorage.removeItem('authToken');
+            selectedFile = null;
+            updateAuthStatus();
+            updateSelectedFileUI();
+            document.getElementById('fileList').innerHTML = '';
+            showResponse({ message: 'Logged out' });
+        }
+
+        async function listFiles() {
+            if (!authToken) {
+                showResponse({ error: 'Please login first' }, true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/files`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const fileListEl = document.getElementById('fileList');
+                    fileListEl.innerHTML = '';
+                    
+                    data.files.forEach(file => {
+                        const li = document.createElement('li');
+                        li.textContent = file;
+                        li.onclick = () => selectFile(file);
+                        fileListEl.appendChild(li);
+                    });
+                    
+                    showResponse(data);
+                } else {
+                    showResponse(data, true);
+                }
+            } catch (error) {
+                showResponse({ error: error.message }, true);
+            }
+        }
+
+        function selectFile(path) {
+            selectedFile = path;
+            
+            document.querySelectorAll('.file-list li').forEach(li => {
+                li.classList.remove('selected');
+                if (li.textContent === path) {
+                    li.classList.add('selected');
+                }
+            });
+            
+            updateSelectedFileUI();
+        }
+
+        function updateSelectedFileUI() {
+            const selectedFileInfo = document.getElementById('selectedFileInfo');
+            const noFileSelected = document.getElementById('noFileSelected');
+            
+            if (selectedFile) {
+                selectedFileInfo.classList.remove('hidden');
+                noFileSelected.classList.add('hidden');
+                document.getElementById('selectedFilePath').textContent = selectedFile;
+                document.getElementById('selectedFileETag').textContent = 'Not loaded yet';
+                document.getElementById('fileContent').value = '';
+            } else {
+                selectedFileInfo.classList.add('hidden');
+                noFileSelected.classList.remove('hidden');
+            }
+        }
+
+        async function readSelectedFile() {
+            if (!selectedFile || !authToken) {
+                showResponse({ error: 'Please select a file and login first' }, true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/files/${selectedFile}`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+
+                if (response.ok) {
+                    const content = await response.text();
+                    const etag = response.headers.get('ETag');
+                    
+                    document.getElementById('fileContent').value = content;
+                    document.getElementById('selectedFileETag').textContent = etag || 'No ETag';
+                    
+                    showResponse({ 
+                        message: 'File loaded successfully',
+                        etag: etag,
+                        contentLength: content.length
+                    });
+                } else {
+                    const data = await response.json();
+                    showResponse(data, true);
+                }
+            } catch (error) {
+                showResponse({ error: error.message }, true);
+            }
+        }
+
+        async function updateSelectedFile() {
+            if (!selectedFile || !authToken) {
+                showResponse({ error: 'Please select a file and login first' }, true);
+                return;
+            }
+
+            const content = document.getElementById('fileContent').value;
+            const currentETag = document.getElementById('selectedFileETag').textContent;
+            
+            if (currentETag === 'Not loaded yet') {
+                showResponse({ error: 'Please read the file first to get current ETag' }, true);
+                return;
+            }
+
+            try {
+                const headers = {
+                    'Authorization': `Bearer ${authToken}`,
+                    'Content-Type': 'application/json'
+                };
+                
+                if (currentETag && currentETag !== 'No ETag') {
+                    headers['If-Match'] = currentETag;
+                }
+
+                const response = await fetch(`${API_BASE}/files/${selectedFile}`, {
+                    method: 'PUT',
+                    headers: headers,
+                    body: JSON.stringify({ content })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('selectedFileETag').textContent = data.etag;
+                    showResponse(data);
+                } else {
+                    showResponse(data, true);
+                }
+            } catch (error) {
+                showResponse({ error: error.message }, true);
+            }
+        }
+
+        async function deleteSelectedFile() {
+            if (!selectedFile || !authToken) {
+                showResponse({ error: 'Please select a file and login first' }, true);
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to delete ${selectedFile}?`)) {
+                return;
+            }
+
+            try {
+                const currentETag = document.getElementById('selectedFileETag').textContent;
+                const headers = {
+                    'Authorization': `Bearer ${authToken}`
+                };
+                
+                if (currentETag && currentETag !== 'Not loaded yet' && currentETag !== 'No ETag') {
+                    headers['If-Match'] = currentETag;
+                }
+
+                const response = await fetch(`${API_BASE}/files/${selectedFile}`, {
+                    method: 'DELETE',
+                    headers: headers
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    selectedFile = null;
+                    updateSelectedFileUI();
+                    listFiles();
+                    showResponse(data);
+                } else {
+                    showResponse(data, true);
+                }
+            } catch (error) {
+                showResponse({ error: error.message }, true);
+            }
+        }
+
+        async function createFile() {
+            if (!authToken) {
+                showResponse({ error: 'Please login first' }, true);
+                return;
+            }
+
+            const path = document.getElementById('newFilePath').value;
+            const content = document.getElementById('newFileContent').value;
+
+            if (!path) {
+                showResponse({ error: 'File path is required' }, true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/files/${path}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('newFilePath').value = '';
+                    document.getElementById('newFileContent').value = '';
+                    listFiles();
+                    showResponse(data);
+                } else {
+                    showResponse(data, true);
+                }
+            } catch (error) {
+                showResponse({ error: error.message }, true);
+            }
+        }
+
+        updateAuthStatus();
+        if (authToken) {
+            listFiles();
+        }
+    </script>
+</body>
+</html>
