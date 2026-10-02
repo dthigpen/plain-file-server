@@ -1,8 +1,8 @@
-# Example Client
+# Plain File Server Example Client
 
-This is a local development/testing tool for the Plain Text File Server API. It demonstrates all major operations: authentication, file listing, reading, creating, updating, and deleting files with proper ETag handling.
+This is a local development/testing tool for the Plain File Server API. It demonstrates authentication, file listing, reading, creating, updating, and deleting files with ETag handling.
 
-**Note:** This is intended for local development and testing only. Since the Plain Text File Server is a dynamic API, this client needs to connect to a running server instance.
+**Note:** This is intended for local development and testing only. Since Plain File Server is a dynamic API, this client needs to connect to a running server instance.
 
 ## Features
 
@@ -16,7 +16,7 @@ This is a local development/testing tool for the Plain Text File Server API. It 
 
 ## Local Testing
 
-1. Start the Plain Text File Server:
+1. Start Plain File Server:
    ```bash
    cd ..
    npm start

@@ -1,21 +1,18 @@
-const bcrypt = require('bcryptjs');
+#!/usr/bin/env node
 
-function generatePasswordHash(password) {
-  const saltRounds = 10;
-  const hash = bcrypt.hashSync(password, saltRounds);
-  return hash;
+const { ConsolePrompter } = require('./setup');
+
+async function main() {
+  if (!process.stdin.isTTY) {
+    throw new Error('Password entry requires an interactive terminal.');
+  }
+  const prompt = new ConsolePrompter();
+  const hash = await prompt.passwordPair('Password (input hidden, 12 characters minimum)');
+  console.log(`Password hash:\n${hash}`);
+  console.log('\nPrefer npm run setup to configure a user without copying hashes.');
 }
 
-// Get password from command line argument
-const password = process.argv[2];
-
-if (!password) {
-  console.log('Usage: node scripts/generate-hash.js <password>');
-  console.log('Example: node scripts/generate-hash.js mysecretpassword');
-  process.exit(1);
-}
-
-const hash = generatePasswordHash(password);
-console.log('Password hash:');
-console.log(hash);
-console.log('\nCopy this hash into your config.json under users[].passwordHash');
+main().catch(error => {
+  console.error(error.message);
+  process.exitCode = 1;
+});

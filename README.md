@@ -1,176 +1,305 @@
-# Plain Text File Server
+# Plain File Server
 
-A lightweight REST API server for reading, writing, and managing plain text files on a host system. Content-agnostic file operations with optimistic concurrency control via ETags.
+Plain File Server is a small, self-hosted backend for applications that store
+data in ordinary files. It gives applications a simple HTTP API for accessing
+user-owned files, without requiring a proprietary database, cloud service, or
+storage format.
 
-**Status: Experimental**
+**The application provides the functionality. You own the data.** Files remain
+normal files that you can inspect, edit, back up, synchronize, or use with
+other software. Applications can be replaced without trapping their data.
 
-## TL;DR
+## What and why
 
-Node.js server that exposes text files via REST API. Designed to work with web frontends and file synchronization tools like Syncthing or Git. Uses JWT authentication and ETags for conflict detection when multiple clients edit the same files.
+In many apps, your data is tied to the app. Plain File Server keeps it in
+ordinary files instead, so you can switch apps without leaving your data
+behind:
 
-## What It Is
-
-A simple HTTP server that treats text files as remote resources. You can CRUD text files (`.txt`, `.md`, `.json`, etc.) over HTTP with authentication and security rules. The server doesn't parse or understand file contents—it just stores and retrieves raw text.
-
-## Primary Use Case
-
-**Web frontend + file backend**
-
-- Run this server on a machine that stores your text files
-- Access files from web applications running on other devices
-- Use file synchronization (Syncthing, Git, etc.) to keep files consistent across multiple servers
-- Build web apps for todo lists, notes, logs, etc. that store data as plain text files
-
-**Example setup:**
-```
-Laptop (Syncthing) ←→ Home Server (plain-text-file-server) ←→ Phone Web App
+```text
+Your apps  --HTTP-->  Plain File Server  -->  your files
 ```
 
-## How It Works
+**One format, many apps:** a budget app can use `budget.txt`, a todo app
+`todo.txt`, and a household recipe app `recipes.txt`. Scripts and text editors
+can work with those same files, too. Inspect, edit, back up, or sync them with
+tools you already use.
 
-### ETag-based Concurrency Control
+**The server handles the plumbing:**
 
-The server uses SHA-1 hashes as ETags to detect concurrent modifications:
+- Authentication and path-based permissions
+- Version history and change detection
+- Optimistic concurrency, so clients can detect conflicting edits
 
-1. **Read**: Client requests file, receives content + ETag header
-2. **Write**: Client sends update with `If-Match: "<ETag>"` header
-3. **Conflict**: If file changed on server since read, server returns `412 Precondition Failed` with current content and ETag
-4. **Resolution**: Client displays conflict to user, who merges changes, then retries with new ETag
+**Your apps handle the meaning:** they choose the file format and decide how
+to resolve conflicts. The server doesn't need to know whether a file contains
+budgets, tasks, or notes. It provides the shared file API—not automatic
+offline-client sync or application-specific merging.
 
-### Client Interaction Pattern
+## Requirements
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant S as Server
-    
-    C->>S: GET /api/files/notes.txt
-    S-->>C: Content + ETag: "abc123"
-    
-    Note over C: User edits offline
-    C->>S: PUT /api/files/notes.txt<br/>If-Match: "abc123"
-    
-    alt No Conflict
-        S-->>C: 200 OK + new ETag: "def456"
-    else Conflict
-        S-->>C: 412 Precondition Failed<br/>+ server content + new ETag
-        Note over C: User resolves conflict
-        C->>S: PUT /api/files/notes.txt<br/>If-Match: "def456"
-        S-->>C: 200 OK
-    end
+- Node.js 20 or newer
+- npm
+- A modern browser for the example client
+
+## First-time setup
+
+Run commands from the repository root:
+
+```sh
+npm ci
+npm run setup
 ```
 
-### Atomic Writes
+The interactive wizard hides password input, confirms the password, stores a
+bcrypt hash, and generates a fresh random JWT signing secret. On first run it
+guides you through the server address and port, document and history
+directories, reconciliation interval, token lifetime, and initial admin
+account. The first admin receives all four operations (`read`, `write`,
+`delete`, and `history`) on all document paths. The wizard requires a
+12-character minimum and a 72-byte maximum (bcrypt's input limit) for newly
+entered passwords.
 
-File modifications use temporary files with atomic rename:
-- Write to `file.txt.tmp.<random>`
-- Rename to `file.txt` (atomic operation)
-- Prevents partial writes if process crashes during write
+The wizard creates `config.json` with owner-only file permissions. The
+repository tracks `config.example.json` as a reference, while `.gitignore`
+excludes the live `config.json` so local credentials and secrets are not
+accidentally committed. Run `npm run setup` before starting the server; never
+commit your generated config, passwords, hashes, or signing secret.
 
-## Security
+### Reconfigure later
 
-### Authentication
+Run `npm run setup` again at any time. The menu lets you:
 
-- JWT tokens with configurable secret and expiry
-- Bcrypt-hashed passwords stored in config
-- Rate-limited login endpoint (5 attempts per 15 minutes per IP)
-- Tokens include user role and allowed subdirectories
+- Change the bind address, port, storage paths, and filesystem scan interval.
+- Add users, change a user's password, manage their principal grants, or remove
+  users.
+- Grant access to an exact path such as `/budget.txt`, a subtree such as
+  `/notes/*`, or all paths with `/*`. Select any combination of `read`,
+  `write`, `delete`, and `history`; grants are additive.
+- Change file rules, including allowed extensions, hidden files, exclusions,
+  read-only patterns, and maximum write size.
+- Change token lifetime or rotate the JWT secret. Secret rotation invalidates
+  all currently issued login tokens.
+- Review a redacted configuration summary and save, or exit without saving.
 
-### CORS
+Prompts show the current value; press Enter to keep it. Menu edits remain
+in-memory until you review and confirm saving. Passwords and hashes are never
+shown in the review. To configure a separate integration account, use
+**Users and permissions → Add login user**, then choose only the paths and
+operations it needs.
 
-- CORS enabled for development (allows all origins)
-- ETag header explicitly exposed for cross-origin requests
-- **Production**: Configure CORS to allow only specific domains
+To manage a configuration at another path:
 
-### Security Considerations
-
-- Binds to `127.0.0.1` by default—use reverse proxy (Caddy, Nginx) or Tailscale for public access
-- HTTPS/TLS termination should be handled by reverse proxy
-- JWT secret must be changed from default in production
-- Path traversal protection prevents access outside storage directory
-- File extension whitelist and glob patterns restrict accessible files
-- Dotfile filtering (configurable) prevents access to hidden files
-
-### Limitations
-
-- No built-in encryption—files stored as plain text
-- No audit logging of file operations
-- No file versioning—use Git or external backup
-- No user-specific file permissions—all users share same file access
-- No compression or deduplication
-- Maximum file size configurable (default 10MB)
-
-## How NOT to Use It
-
-- **Don't** store sensitive data without encryption at rest
-- **Don't** expose directly to internet without reverse proxy and HTTPS
-- **Don't** use for binary files (images, PDFs, etc.)
-- **Don't** expect enterprise features (auditing, RBAC, etc.)
-- **Don't** use as a general-purpose file server (no access to all file types)
-
-## API Endpoints
-
-### Authentication
-
-**POST /api/login**
-```json
-{
-  "username": "admin",
-  "password": "your_password"
-}
+```sh
+npm run setup -- --config /path/to/config.json
 ```
-Returns JWT token for subsequent requests.
 
-### File Operations
+Start the server with that same configuration using:
 
-All file endpoints require `Authorization: Bearer <token>` header.
+```sh
+npm start -- --config /path/to/config.json
+```
 
-**GET /api/files** - List all accessible files
-**GET /api/files/*path** - Read file content (returns ETag header)
-**PUT /api/files/*path** - Create/update file (requires If-Match for updates)
-**DELETE /api/files/*path** - Delete file (optional If-Match)
-**POST /api/move** - Move/rename file
+Without `--config`, the server reads `./config.json` relative to its working
+directory.
 
-See [DESIGN.md](DESIGN.md) for complete API specification.
+The default storage directory is `./storage`, relative to the directory from
+which the process starts. Storage and history paths can also be absolute or
+home-relative, such as `~/syncthing/household`; `~` and `~/...` are expanded to
+the server user's home directory. Version metadata and historical content are
+stored separately; keep the history directory outside any directory managed
+by Syncthing or another file synchronizer. The server creates both directories
+when needed. Review `config.json` for file extensions, excluded paths,
+read-only paths, size limits, and the filesystem reconciliation interval.
 
-## Setup
+The extension policy menu supports unrestricted names (extensions optional),
+any name that has an extension, extensionless names only, or extensionless
+names plus a specific extension allowlist. In the config file these modes are
+represented by `["*"]`, `[".*"]`, `[]`, or an explicit list such as
+`[".txt", ".md"]`, respectively.
 
-1. Install dependencies: `npm install`
-2. Generate password hash: `npm run generate-hash <password>`
-3. Update `config.json` with your JWT secret and user credentials
-4. Create storage directory: `mkdir storage`
-5. Start server: `npm start`
+## Start the server
 
-## Configuration
+```sh
+npm start
+```
 
-Edit `config.json`:
+The server listens on `http://127.0.0.1:3000` by default. Check that it is
+running:
+
+```sh
+curl http://127.0.0.1:3000/health
+```
+
+Expected response:
 
 ```json
-{
-  "server": {
-    "port": 3000,
-    "host": "127.0.0.1",
-    "storageDir": "./storage"
-  },
-  "auth": {
-    "jwtSecret": "CHANGE_THIS_SECRET",
-    "tokenExpiryDays": 30,
-    "users": [...]
-  },
-  "rules": {
-    "ignoreDotfiles": true,
-    "maxFileSizeMb": 10,
-    "allowedExtensions": [".txt", ".md", ".json", ...],
-    "excludePatterns": ["**/node_modules/**", ...],
-    "readOnlyPatterns": ["**/archive/**", ...]
-  }
-}
+{"status":"ok"}
 ```
 
-## Example Client
+The default host is loopback-only. The current server enables permissive
+cross-origin requests; before exposing it to browsers outside a trusted local
+setup, restrict allowed origins in the server or at a trusted proxy. Use HTTPS
+and a trusted reverse proxy or private network for remote access. The example
+client stores its JWT in browser `localStorage` and is for local development
+only.
 
-See the [example-client](example-client/) directory for a local development tool that demonstrates authentication and API interaction. Since this is a dynamic API server, the example client is intended for local testing and development only—you'll need to run the server instance to use it.
+## Try the API with curl
 
-## License
+The following examples assume the default port and the admin username and
+password you chose in the setup wizard. Log in and copy the returned token:
 
-MIT
+```sh
+curl -sS http://127.0.0.1:3000/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"your-setup-password"}'
+```
+
+Set `TOKEN` to the token from the login response, then list accessible files:
+
+```sh
+TOKEN='paste-token-from-login-response'
+
+curl -i http://127.0.0.1:3000/api/files \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Create a new document. A new path starts at version 1 and does not need
+`If-Match`:
+
+```sh
+curl -i -X PUT http://127.0.0.1:3000/api/files/notes/today.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"content":"First note\n"}'
+```
+
+Read the current document and note its `ETag` and `X-Version` response
+headers:
+
+```sh
+curl -i http://127.0.0.1:3000/api/files/notes/today.txt \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Update an existing document with the exact ETag received from `GET`.
+Paste the entire quoted value (for example, `"abc123..."`) into `ETAG`:
+
+```sh
+ETAG='"paste-the-entire-quoted-etag-here"'
+
+curl -i -X PUT http://127.0.0.1:3000/api/files/notes/today.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: text/plain' \
+  -H "If-Match: $ETAG" \
+  --data-binary 'Updated note'
+```
+
+If the document has changed since the ETag was read, the server returns
+`412 Precondition Failed` rather than overwriting the newer content. Updating
+an existing document without `If-Match` returns `428 Precondition Required`.
+The server may also return 412 when creation includes an `If-Match` condition
+that cannot be satisfied.
+
+Check metadata without downloading the body, list history, and retrieve a
+specific historical version:
+
+```sh
+curl -I http://127.0.0.1:3000/api/files/notes/today.txt \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -sS http://127.0.0.1:3000/api/files/notes/today.txt/history \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -i http://127.0.0.1:3000/api/files/notes/today.txt/versions/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Set `ETAG` to the most recent ETag returned by `GET` or `PUT` to demonstrate a
+304 response. An older ETag correctly receives the latest representation
+instead:
+
+```sh
+curl -i http://127.0.0.1:3000/api/files/notes/today.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "If-None-Match: $ETAG"
+```
+
+A match returns `304 Not Modified`. Deletion preserves history; `If-Match` is
+optional for `DELETE`, but recommended:
+
+```sh
+curl -i -X DELETE http://127.0.0.1:3000/api/files/notes/today.txt \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "If-Match: $ETAG"
+```
+
+After deletion, current `GET` and `HEAD` return 404, while history and
+historical-version requests remain available to principals with `history`.
+External edits and deletions are reconciled into history during a path request
+or the periodic scan.
+
+## Test it with the example client
+
+The example client is a small browser UI for login, listing files, reading,
+creating, updating, and deleting. It does not currently expose the history or
+historical-version endpoints; use the curl commands above to inspect those.
+
+1. Start the API server in a terminal from the repository root:
+
+   ```sh
+   npm start
+   ```
+
+2. In a second terminal, serve the example client as a static page:
+
+   ```sh
+   python3 -m http.server 8080 --directory example-client
+   ```
+
+3. Open <http://127.0.0.1:8080> in your browser.
+4. Leave the server URL set to `http://127.0.0.1:3000/api` and click **Save
+   Configuration** if you changed it.
+5. Log in using the username and password you created in the setup wizard
+   (the initial username defaults to `admin`).
+6. Select an existing file from the list and click **Read File** before
+   editing. The UI loads the current ETag; click **Update File** to send the
+   edit conditionally. Refreshing or logging in again reloads the file list.
+7. To create a document, enter a relative path such as
+   `notes/from-browser.txt`, enter its content, then click **Create File**.
+   Nested directories are created as needed. The path is relative to
+   `storageDir`.
+8. To remove a document, select it, read it to load its ETag, and click
+   **Delete File**. Its version history remains on the server.
+
+The client saves its server URL and JWT in `localStorage`. Click **Logout** or
+clear this site's local storage when finished, especially on a shared browser.
+If the page cannot reach the API, check that the server is running and that
+its CORS policy allows the page's origin.
+
+## Documents, paths, and limits
+
+- API paths are logical paths below `storageDir`; use `/` between components.
+  URL-encode special characters in a path component (for example, a space as
+  `%20`).
+- Traversal, encoded separators, backslashes, and symbolic links are rejected.
+  Directories are not documents and cannot be read as files.
+- Dotfiles, excluded patterns, extensions, read-only patterns, and maximum
+  write size are governed by `config.json`.
+- Existing files discovered on disk start at version 1. Content changes made
+  through the API or directly on disk create later versions when observed.
+- Polling records states the server observes; quick successive external edits
+  between scans may be seen as one change.
+- The server is content-agnostic. It does not parse document formats, merge
+  edits, or understand Syncthing-specific operations.
+
+See [SPEC.md](SPEC.md) for the complete configuration schema, HTTP behavior,
+permissions, path rules, and lifecycle guarantees.
+
+## Development
+
+Install dependencies with `npm ci` and run the automated unit and integration
+tests with:
+
+```sh
+npm test
+```

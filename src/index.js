@@ -1,48 +1,84 @@
 const express = require('express');
 const cors = require('cors');
-const { loadConfig } = require('./config');
+const path = require('path');
+const { getConfig, loadConfig } = require('./config');
 const authRoutes = require('./routes/authRoutes');
-const fileRoutes = require('./routes/fileRoutes');
+const { createFileRoutes } = require('./routes/fileRoutes');
+const { FileService } = require('./services/fileService');
 
-const app = express();
+function createApp(config = getConfig(), fileService = new FileService(config)) {
+  fileService.reconcile();
+  const app = express();
+  const parserLimit = `${config.rules.maxFileSizeMb + 1}mb`;
 
-// Load configuration
-try {
-  loadConfig();
-  console.log('Configuration loaded successfully');
-} catch (error) {
-  console.error('Failed to load configuration:', error.message);
-  process.exit(1);
+  app.use(cors({
+    exposedHeaders: ['ETag', 'X-Version']
+  }));
+  app.use(express.text({ type: 'text/plain', limit: parserLimit }));
+  app.use(express.json({ limit: parserLimit }));
+  app.use(express.urlencoded({ extended: true, limit: parserLimit }));
+  app.use('/api', authRoutes);
+  app.use('/api', createFileRoutes(fileService));
+
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+
+  app.use((error, req, res, next) => {
+    if (res.headersSent) {
+      return next(error);
+    }
+    const status = Number.isInteger(error.status) ? error.status : 500;
+    if (status >= 500) {
+      console.error('Unhandled request error:', error);
+    }
+    res.status(status).json({
+      error: status === 500 ? 'Internal server error' : error.message,
+      ...error.details
+    });
+  });
+
+  app.locals.fileService = fileService;
+  return app;
 }
 
-// Middleware
-app.use(cors({
-  exposedHeaders: ['ETag']
-}));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+function startServer(configPath = path.join(process.cwd(), 'config.json')) {
+  const config = loadConfig(configPath);
+  const fileService = new FileService(config);
+  const app = createApp(config, fileService);
+  const { port, host, reconcileIntervalMs = 5000 } = config.server;
+  const reconcileTimer = setInterval(() => {
+    try {
+      fileService.reconcile();
+    } catch (error) {
+      console.error('Filesystem reconciliation failed:', error);
+    }
+  }, reconcileIntervalMs);
+  reconcileTimer.unref();
 
-// Routes
-app.use('/api', authRoutes);
-app.use('/api', fileRoutes);
+  const server = app.listen(port, host, () => {
+    console.log(`Plain file server running on http://${host}:${port}`);
+    console.log(`Storage directory: ${fileService.storageRoot}`);
+  });
+  server.on('close', () => clearInterval(reconcileTimer));
+  return server;
+}
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+if (require.main === module) {
+  try {
+    const args = process.argv.slice(2);
+    let configPath = path.join(process.cwd(), 'config.json');
+    if (args.length > 0) {
+      if (args.length !== 2 || args[0] !== '--config') {
+        throw new Error('Usage: node src/index.js [--config <path>]');
+      }
+      configPath = path.resolve(args[1]);
+    }
+    startServer(configPath);
+  } catch (error) {
+    console.error('Failed to start server:', error.message);
+    process.exit(1);
+  }
+}
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-// Start server
-const config = loadConfig();
-const PORT = config.server.port;
-const HOST = config.server.host;
-
-app.listen(PORT, HOST, () => {
-  console.log(`Text Bridge server running on http://${HOST}:${PORT}`);
-  console.log(`Storage directory: ${config.server.storageDir}`);
-});
+module.exports = { createApp, startServer };

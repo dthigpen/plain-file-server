@@ -1,6 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { findUser, verifyPassword, generateToken } = require('../services/authService');
+const { getConfig } = require('../config');
 
 const router = express.Router();
 
@@ -31,7 +32,7 @@ router.post('/login', loginLimiter, (req, res) => {
   
   res.json({
     token,
-    expiresInDays: 30
+    expiresInDays: getConfig().auth.tokenExpiryDays
   });
 });
 

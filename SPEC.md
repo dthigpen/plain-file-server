@@ -1,321 +1,393 @@
-# Generic Text File Server Engine - Specification & Architecture
+# Plain File Server — Specification
 
-A lightweight, content-agnostic REST API server for reading, writing, creating, and managing plain-text files on a host system. 
+Plain File Server is a small, content-agnostic HTTP service for versioned text
+documents stored as ordinary files on the host. Applications own document
+meaning and merge behavior; the server owns document paths, access control,
+current contents, immutable history, and optimistic concurrency.
 
-This server acts as a remote web facade for local plain-text workflows (`todo.txt`, Markdown notes, plain text logs, etc.) alongside file synchronization tools like **Syncthing**. The server enforces zero assumptions about file content structures, delegating conflict management and presentation logic entirely to client applications.
+The filesystem contains each current document in its normal location, so tools
+such as Syncthing, editors, and shell commands can continue to use it. A
+separate server-managed history directory records versions and metadata.
 
----
+## 1. Principles and scope
 
-## 1. System Architecture Overview
+- A document is identified by its logical path relative to the configured
+  storage root.
+- Document contents are opaque text bytes to the server. It does not interpret
+  Markdown, budgets, tasks, or other application formats.
+- Every observed content change creates an immutable, locally ordered version.
+- ETags identify versions for HTTP caching and concurrency; clients treat them
+  as opaque.
+- Filesystem changes made outside the API are reconciled into the same version
+  history as API writes.
+- The server does not infer filesystem rename, copy, or move intent. A removed
+  path is a deletion; a newly observed path is a new document.
+- The initial design is single-server and does not implement distributed
+  version graphs, CRDTs, application-specific merges, or federation.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       Client Application                    │
-│                                                             │
-│   • Authenticates via JWT (/api/login)                      │
-│   • Reads files with ETag tracking                          │
-│   • Handles offline staging in localStorage / IndexedDB     │
-│   • Resolves 412 Precondition Failed conflicts in UI        │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ HTTPS (Tailscale / Caddy)
-                               │ Authorization: Bearer <JWT>
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Node.js REST Server (Express / Fastify)    │
-│                                                             │
-│   ┌─────────────────────────────────────────────────────┐   │
-│   │ 1. Config & Rule Matching Engine                    │   │
-│   │    • Path Traversal Security Guard                  │   │
-│   │    • Glob / Extension / Read-Only Filter Evaluation │   │
-│   └──────────────────────────┬──────────────────────────┘   │
-│                              │                              │
-│   ┌──────────────────────────▼──────────────────────────┐   │
-│   │ 2. ETag & Atomic I/O Engine                         │   │
-│   │    • SHA-1 Hash Generation                          │   │
-│   │    • If-Match Header Precondition Validation        │   │
-│   │    • Temporary File (.tmp) Atomic Write + Rename    │   │
-│   └─────────────────────────────────────────────────────┘   │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ Local File System Operations
-                               ▼
-┌─────────────────────────────────────────────────────────────┐
-│              Target Storage Directory on Host               │
-│               (Background Syncthing Managed)                │
-└─────────────────────────────────────────────────────────────┘
-```
+The API provides file listing for compatibility and document operations for
+read, write, delete, and history. It does not expose general filesystem
+management operations such as move, copy, or directory creation.
 
----
+## 2. Document and version lifecycle
 
-## 2. Core Operational Principles
+### Current files and immutable versions
 
-1. **Content Agnosticism:** The server treats all target files as plain text bytes. It does not parse, transform, or validate file structures (no assumptions about `todo.txt`, Markdown syntax, or code format).
-2. **Atomic Writes:** All file modifications write to a temporary file (`.tmp.[random]`) in the same directory before performing an atomic replace (`fs.rename`). This prevents corrupted or partially written files when Syncthing or other watchers read disk changes.
-3. **Optimistic Guarding (ETags):** Read operations supply an `ETag` header (SHA-1 hash of the file content). Write operations (`PUT`) require an `If-Match: "<hash>"` header. If the file on disk changes prior to write execution, the server rejects the edit with HTTP `412 Precondition Failed`.
-4. **Proxy-Friendly Security:** The server binds to `127.0.0.1` by default and delegates TLS termination to a local reverse proxy (Caddy, Nginx) or a zero-trust mesh network (Tailscale).
+A document path has a sequence of versions numbered from 1. Each version
+contains the exact bytes observed, a stable ETag, an ISO-8601 UTC timestamp,
+and its byte length. Version numbers increase within the server's history for
+that path; they are not distributed identifiers.
 
----
+- A previously unknown file discovered on disk or created by `PUT` starts at
+  version 1.
+- A content change moves the former current version into history and records a
+  new current version.
+- Reconciliation of unchanged content does not create a version.
+- A successful `PUT` with content identical to the current version does not
+  create a duplicate version.
+- The current file remains an ordinary file under `storageDir`. The history
+  store is separate from that document tree and is not part of the public API.
+- History persists across server restarts. The server loads its index and
+  reconciles it with the filesystem at startup.
 
-## 3. Configuration Specification (`config.json`)
+By default, `historyDir` is the resolved storage directory with `.history`
+appended (for example, `./storage` uses `./storage.history`). Configure it
+outside any directory managed by file synchronization. `historyDir` and
+`storageDir` must not contain one another.
 
-On startup, the server loads a configuration file. Below is the full configuration schema:
+### External filesystem changes
+
+At startup and periodically thereafter, the server scans the document tree.
+Before a path-specific API operation, it also reconciles that path so the
+request observes external changes without waiting for the next scan.
+
+- New eligible file: create version 1.
+- Changed file: record a new version if its bytes differ from the current
+  version.
+- Removed file: mark the document deleted and preserve all versions.
+- Moved/renamed file: treat the old path as deleted and the new path as a
+  separate document with its own history.
+- Unchanged file: do nothing.
+
+The default full-scan interval is 5 seconds and can be changed with
+`server.reconcileIntervalMs`. Polling only guarantees that states observed by
+the server are versioned; multiple edits between scans may be observed as one
+change. Filesystem notifications, intermediate-state capture, and change
+feeds are not part of this version.
+
+### Deletion and recreation
+
+Deletion is recorded as document metadata, not as a content version or
+tombstone. A deleted document has no current representation: `GET` and `HEAD`
+return 404, while history and historical versions remain available to
+authorized clients.
+
+If a file later reappears at the same logical path, it resumes that path's
+version sequence. This preserves a simple path-based identity model without a
+separate document ID. A moved file at a different path does not transfer its
+history.
+
+### Write and recovery behavior
+
+API writes validate the request and concurrency condition, atomically replace
+the current file using a temporary file in the same directory, then record the
+new immutable version and metadata. Existing version snapshots are never
+rewritten. If recording metadata fails after the file replacement, the
+request fails; later reconciliation detects the filesystem contents and
+records them. Startup reconciliation likewise repairs a filesystem/index
+mismatch after an interrupted operation.
+
+This is not a multi-resource transaction and does not promise immunity to
+power loss, storage failure, or simultaneous writes by other local processes.
+The server does not promise to capture every intermediate state of an
+externally edited file.
+
+## 3. Configuration
+
+The server reads `config.json` from its working directory.
+
+The repository tracks `config.example.json` as a configuration reference and
+ignores the live `config.json` to reduce the risk of committing credentials or
+secrets. Run `npm run setup` to create the initial `config.json` and
+interactively configure credentials and a signing secret, or re-run it later
+to edit server settings, users, grants, and file rules. Password entry is
+hidden; newly entered passwords must contain at least 12 characters and no
+more than 72 UTF-8 bytes (bcrypt's input limit). The wizard writes the
+configuration with restrictive owner-only permissions.
+A separate config file may be selected with
+`npm run setup -- --config <path>` and loaded by the server with
+`npm start -- --config <path>`.
 
 ```json
 {
   "server": {
     "port": 3000,
     "host": "127.0.0.1",
-    "storageDir": "./storage"
+    "storageDir": "./storage",
+    "historyDir": "./storage-history",
+    "reconcileIntervalMs": 5000
   },
   "auth": {
-    "jwtSecret": "REPLACE_WITH_A_SECURE_RANDOM_SECRET_KEY",
+    "jwtSecret": "replace-with-a-long-random-secret",
     "tokenExpiryDays": 30,
     "users": [
       {
         "username": "admin",
-        "passwordHash": "$2a$10$YourBcryptPasswordHashHere",
-        "role": "admin",
-        "allowedSubdirs": ["*"]
+        "passwordHash": "$2a$10$...",
+        "principal": "admin"
       }
-    ]
+    ],
+    "principals": {
+      "admin": {
+        "grants": [
+          {
+            "path": "/*",
+            "operations": ["read", "write", "delete", "history"]
+          }
+        ]
+      }
+    }
   },
   "rules": {
     "ignoreDotfiles": true,
     "maxFileSizeMb": 10,
     "allowedExtensions": [".txt", ".md", ".org", ".json", ".csv", ".log", ".yaml", ".yml"],
-    "excludePatterns": [
-      "**/node_modules/**",
-      "**/.git/**",
-      "**/.sync/**",
-      "**/private/**"
-    ],
-    "readOnlyPatterns": [
-      "**/archive/**",
-      "**/templates/**"
-    ]
+    "excludePatterns": ["**/node_modules/**", "**/.git/**", "**/private/**"],
+    "readOnlyPatterns": ["**/archive/**", "**/templates/**"]
   }
 }
 ```
 
-### Path Evaluation Pipeline
-When an API request targets a relative file path (e.g., `PUT /api/files/notes/todo.txt`), the server evaluates constraints in order:
+`storageDir` and `historyDir` may be relative to the process working directory,
+absolute, or home-relative using `~` or `~/path` (for example,
+`~/syncthing/household`). Home-relative paths are expanded to an absolute path
+before use. Other `~name` forms are rejected. The server creates missing
+directories. `reconcileIntervalMs` defaults to 5000 and must be at least 100
+milliseconds.
 
-1. **Path Traversal Guard:** Resolve `storageDir + path`. Reject with `403 Forbidden` if resolved path lies outside `storageDir`.
-2. **Dotfile Guard:** If `ignoreDotfiles` is `true` and any segment starts with `.`, reject with `403 Forbidden`.
-3. **Exclude Patterns:** Match against `excludePatterns` globs. Reject with `403 Forbidden` on match.
-4. **Extension Whitelist:** Verify file extension against `allowedExtensions`. Reject with `415 Unsupported Media Type` if unlisted.
-5. **Permissions Check:** For write operations (`PUT`, `DELETE`), match path against `readOnlyPatterns`. Reject with `403 Forbidden` on match.
-6. **File Size Limit:** Check target payload size against `maxFileSizeMb`. Reject with `413 Payload Too Large` if exceeded.
+Global rules apply independently of principal grants:
 
----
+- `ignoreDotfiles` rejects any document path with a dot-prefixed component.
+- Names beginning with the server-reserved `.pfs-tmp-` prefix are never
+  exposed as documents; atomic-write temporary files use this namespace.
+- `excludePatterns` reject matching paths for all operations.
+- `allowedExtensions` controls filename extensions:
+  - `["*"]` allows any extension and extensionless names.
+  - `[".*"]` allows any name with an extension and rejects extensionless names.
+  - `[]` allows extensionless names only.
+  - An explicit list such as `[".txt", ".md"]` allows those extensions and
+    extensionless names for backward compatibility.
+  `*` and `.*` are reserved markers and must each appear alone. A rejected
+  extension or a missing required extension returns 415.
+- `readOnlyPatterns` reject `PUT` and `DELETE` for matching paths.
+- `maxFileSizeMb` limits the decoded content of a write.
 
-## 4. API Endpoints Reference
-
-All endpoints except `POST /api/login` require HTTP header `Authorization: Bearer <JWT_TOKEN>`.
+## 4. Authentication and authorization
 
 ### Authentication
 
-#### `POST /api/login`
-Authenticates user credentials and returns a signed JWT token.
+`POST /api/login` authenticates a configured username and bcrypt password hash
+and returns a signed JWT. The JWT identifies a principal; credentials are not
+the authorization policy. Login is rate limited. Requests to file endpoints
+must include `Authorization: Bearer <token>`.
 
-* **Request Body:**
-  ```json
-  {
-    "username": "admin",
-    "password": "your_password"
-  }
-  ```
-* **Success Response (200 OK):**
-  ```json
-  {
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "expiresInDays": 30
-  }
-  ```
-* **Error Response (401 Unauthorized):**
-  ```json
-  {
-    "error": "Invalid username or password"
-  }
-  ```
+Authentication failure returns 401. `GET /health` and `POST /api/login` do not
+require a token.
 
----
+### Principals and grants
 
-### File Management
+A user maps to a principal through `users[].principal` (or to a principal
+with the same name when omitted). A principal has additive grants. Each grant
+contains a logical path scope and one or more operations:
 
-#### `GET /api/files`
-Recursively lists all accessible text files inside `storageDir` matching rule criteria.
+- `read`: current-file `GET`, `HEAD`, and access to the file listing.
+- `write`: create or update using `PUT`.
+- `delete`: delete using `DELETE`.
+- `history`: list history or retrieve historical versions.
 
-* **Success Response (200 OK):**
-  ```json
-  {
-    "files": [
-      "todo.txt",
-      "done.txt",
-      "notes/journal.md",
-      "projects/ideas.txt"
-    ]
-  }
-  ```
+An exact scope such as `/budget.txt` matches only that document. A recursive
+scope such as `/household/*` matches documents beneath that directory, at any
+depth. `/*` matches every document. No other wildcard or pattern syntax is
+supported. If multiple grants match, their operations are combined
+additively; there are no deny rules. Read, write, delete, and history do not
+imply one another.
 
----
+A valid principal without the required operation receives 403. Authorization
+uses the validated logical document path and occurs before filesystem
+contents are returned or changed.
 
-#### `GET /api/files/*path`
-Retrieves raw file content and returns its current ETag.
+For existing configurations without `auth.principals`, legacy
+`users[].allowedSubdirs` values are treated as recursive scopes granting the
+four supported operations; `["*"]` grants all paths. New configurations
+should use explicit principals and grants. The old `role` field has no special
+authorization behavior.
 
-* **Response Headers:**
-  * `Content-Type: text/plain; charset=utf-8`
-  * `ETag: "a1b2c3d4e5f6..."` (SHA-1 hash of content)
-* **Success Response (200 OK):**
-  Raw string payload of the file.
-* **Error Responses:**
-  * `404 Not Found`: File does not exist.
-  * `403 Forbidden`: Path blocked by security rule.
+## 5. Document paths and filesystem boundary
 
----
+The path after `/api/files/` is a URL representation of a logical document
+path, not a filesystem path. `/` separates components. Each component is
+percent-decoded as UTF-8 before validation; query strings are not part of the
+path, and URL fragments are never sent to the server. Ordinary Unicode names
+are preserved without Unicode normalization.
 
-#### `PUT /api/files/*path`
-Creates a new file or updates an existing file using atomic write operations.
+The server rejects empty components, `.` and `..`, decoded `/` or `\\`,
+NUL, drive-prefixed components such as `C:`, malformed encoding, and encoded
+separators such as `%2F` and `%5C`. Absolute paths and traversal are not
+accepted. Backslashes are not document separators. A request using an unsafe
+path receives 400.
 
-* **Request Headers:**
-  * `Content-Type: application/json` or `text/plain`
-  * `If-Match: "a1b2c3d4e5f6..."` (*Required for updates to existing files*)
-* **Request Body (JSON format):**
-  ```json
-  {
-    "content": "Updated file content goes here\n"
-  }
-  ```
+Every existing component is checked for symbolic links; symlinks in the final
+file or an intermediate directory are rejected with 403. The resolved target
+must remain beneath the canonical storage root. This applies to current-file,
+history, version, and mutation endpoints. There is no directory listing
+endpoint: a directory is not a document and a request to read one returns 400.
+Platform-specific invalid filenames may be unavailable on the host filesystem.
 
-* **Success Response (200 OK):**
-  * **Headers:** `ETag: "f6e5d4c3b2a1..."` (New SHA-1 hash)
-  * **Body:**
-    ```json
+The history suffix routes reserve terminal `/history` and
+`/versions/{number}` patterns. To address an ordinary document whose path
+would otherwise match one of those routes, percent-encode the first character
+of the reserved terminal component (for example, use `%68istory` for a file
+whose last component is literally `history`).
+
+## 6. HTTP API
+
+All routes below are under `/api`. File routes require authentication and the
+operation-specific grant. JSON error responses have an `error` field; some
+conditional-write errors also include current server metadata.
+
+### Login
+
+`POST /api/login`
+
+Request JSON:
+
+```json
+{"username":"admin","password":"your-password"}
+```
+
+Success (200):
+
+```json
+{"token":"<jwt>","expiresInDays":30}
+```
+
+Missing credentials return 400; invalid credentials return 401.
+
+### List eligible files
+
+`GET /api/files` requires authentication. It returns
+`{"files":["notes/today.md"]}` containing eligible current document paths for
+which the principal has `read`. Paths hidden by global rules are omitted.
+
+### Read the current document
+
+`GET /api/files/{path}` and `HEAD /api/files/{path}` require `read`.
+
+`GET` returns the current file bytes as `text/plain; charset=utf-8`.
+`HEAD` returns the same status and metadata without a body. Both return:
+
+- `ETag`: quoted opaque entity tag.
+- `X-Version`: current local version number.
+- `Content-Length`: byte length of the current representation.
+
+`If-None-Match` is supported on both methods. A matching tag or `*` returns
+304 with no body; otherwise the current representation is returned normally.
+Current-file reads reconcile the path with the filesystem before responding.
+
+Missing and deleted documents return 404. Directories return 400; paths
+rejected by dotfile/exclusion rules or authorization return 403; disallowed
+extensions return 415; unsafe paths return 400.
+
+### Create or update a document
+
+`PUT /api/files/{path}` requires `write`. The body may be raw `text/plain`
+text or JSON of the form `{"content":"..."}`. A successful request returns
+200 with a JSON body containing `success`, `version`, and `etag`; it also
+returns the new `ETag` and `X-Version` headers.
+
+- Creating a path with no current file creates version 1. A write may include
+  `If-Match` only if the resource exists; any `If-Match` condition fails when
+  the resource does not exist.
+- Updating an existing file requires `If-Match`. Missing header returns 428.
+- A matching strong tag or `If-Match: *` allows the update. A nonmatching or
+  weak tag returns 412.
+- A failed precondition does not overwrite the current file. The 412 response
+  includes `serverETag` and `serverContent` for a stale update.
+- Content identical to the current version succeeds without creating a
+  duplicate version.
+- A write larger than `maxFileSizeMb` returns 413.
+
+### Delete a document
+
+`DELETE /api/files/{path}` requires `delete`. `If-Match` is optional for
+compatibility; when supplied, it must strongly match the current ETag or the
+request returns 412. Deletion returns `{"success":true}`. Missing documents
+return 404. The current file is removed, but all content versions remain
+available through history. Deletion does not consume a version number.
+
+### List document history
+
+`GET /api/files/{path}/history` requires `history`. It returns versions in
+ascending version order:
+
+```json
+{
+  "deleted": false,
+  "versions": [
     {
-      "success": true,
-      "etag": "\"f6e5d4c3b2a1...\""
+      "version": 1,
+      "etag": "\"opaque-tag\"",
+      "timestamp": "2026-09-29T12:00:00.000Z",
+      "sizeBytes": 123,
+      "current": false
     }
-    ```
-
-* **Conflict Error Response (412 Precondition Failed):**
-  Occurs when the file on disk was modified since the client last fetched it.
-  ```json
-  {
-    "error": "Precondition Failed: File on server has changed.",
-    "serverETag": "\"f6e5d4c3b2a1...\"",
-    "serverContent": "Current content on host disk...\n"
-  }
-  ```
-
----
-
-#### `DELETE /api/files/*path`
-Deletes a target file.
-
-* **Request Headers:**
-  * `If-Match: "a1b2c3d4e5f6..."` (*Optional but recommended*)
-* **Success Response (200 OK):**
-  ```json
-  {
-    "success": true
-  }
-  ```
-* **Conflict Error Response (412 Precondition Failed):**
-  Returned if `If-Match` was supplied and file changed before deletion.
-
----
-
-#### `POST /api/move`
-Renames or relocates a file within the storage tree.
-
-* **Request Body:**
-  ```json
-  {
-    "oldPath": "notes/draft.md",
-    "newPath": "notes/archive/draft.md"
-  }
-  ```
-* **Success Response (200 OK):**
-  ```json
-  {
-    "success": true
-  }
-  ```
-
----
-
-## 5. Client Offline & Conflict Resolution Lifecycle
-
-Clients implementing offline support must follow this operational flow:
-
-```
-                  ┌─────────────────────────────┐
-                  │ Client performs offline edit │
-                  └──────────────┬──────────────┘
-                                 │
-                                 ▼
-                  ┌─────────────────────────────┐
-                  │ Save pending edits to       │
-                  │ localStorage / IndexedDB    │
-                  └──────────────┬──────────────┘
-                                 │
-                         (Network Reconnects)
-                                 │
-                                 ▼
-         ┌────────────────────────────────────────────────┐
-         │ Send PUT /api/files/*path                      │
-         │ Header: If-Match: <ORIGINAL_CACHED_ETAG>       │
-         └───────────────────────┬────────────────────────┘
-                                 │
-                   ┌─────────────┴─────────────┐
-                   │                           │
-            [ Status 200 OK ]         [ Status 412 Failed ]
-                   │                           │
-                   ▼                           ▼
-        (Update cached ETag)       1. Extract serverContent & serverETag
-                                   2. Display side-by-side diff UI:
-                                      • Remote (server) version
-                                      • Staged (local) version
-                                      • Combined editor output
-                                   3. User resolves differences
-                                   4. Client re-sends PUT with
-                                      If-Match: <NEW_SERVER_ETAG>
+  ]
+}
 ```
 
----
+The current version has `current: true` while the document exists; a deleted
+document has no current version. A known deleted document still has accessible
+history. A path with no recorded versions returns 404.
 
-## 6. Implementation Technical Stack Recommendations
+### Retrieve a historical version
 
-* **Runtime:** Node.js (v20+ LTS)
-* **Framework Options:**
-  * **Express (v5):** Battle-tested, clean route handling, standard middleware ecosystem.
-  * **Fastify:** High throughput, native JSON schema validation, lightweight footprint.
-* **Security & Utility Packages:**
-  * `jsonwebtoken` - JWT signing and verification.
-  * `bcryptjs` - Password hash verification.
-  * `picomatch` / `minimatch` - High-performance glob matching for `config.json` rules.
-  * `express-rate-limit` - Rate limiting on `/api/login` to prevent brute-force attacks.
+`GET /api/files/{path}/versions/{version}` requires `history`, where `version`
+is a positive decimal integer. It returns the exact stored bytes as
+`text/plain; charset=utf-8`, with that version's `ETag`, `X-Version`, and
+`Content-Length`. `If-None-Match` returns 304 when it matches. An unknown
+version returns 404; malformed identifiers return 400.
 
----
+### ETag and version contract
 
-## 7. Recommended Repository File Structure
+ETags are quoted, opaque SHA-256-based tags tied to a document path, version,
+and content. A tag is stable for a version and changes when a new version is
+created, including when a deleted path is recreated with identical content.
+Clients must not derive a version number from an ETag or vice versa.
 
-```
-file-server/
-├── config.json               # Local environment configuration & path rules
-├── package.json              # Dependencies and scripts
-├── README.md                 # Setup and run instructions
-├── src/
-│   ├── index.js              # Server entry point & HTTP listener
-│   ├── config.js             # Configuration loader & validator
-│   ├── middleware/
-│   │   ├── auth.js           # JWT authentication middleware
-│   │   └── rules.js          # Path traversal & policy evaluation rules
-│   ├── services/
-│   │   ├── fileService.js    # Atomic file I/O operations & ETag generation
-│   │   └── authService.js    # Password hashing & JWT token issuance
-│   └── routes/
-│       ├── authRoutes.js     # /api/login endpoint
-│       └── fileRoutes.js     # /api/files/* CRUD endpoints
-└── scripts/
-    └── generate-hash.js      # CLI helper to generate bcrypt password hashes
-```
+`If-Match` uses strong comparison for writes. `If-None-Match` uses weak
+comparison for reads. Tags may be supplied as a comma-separated list where
+applicable. `*` matches an existing representation.
+
+## 7. Deferred work and explicit non-goals
+
+The current implementation stops at core versioning, version/history
+endpoints, logical-path safety, and principal-based authorization. The
+following remain future work, to be justified by a real client:
+
+- A generic change feed and resumable synchronization cursor.
+- A real client integration and offline/local-first synchronization behavior.
+- More efficient filesystem notifications; polling remains the correctness
+  mechanism.
+- Version retention/pruning, history-store migrations, and administrative
+  recovery tools.
+- Multi-server federation, distributed identities, revision graphs, vector
+  clocks, CRDTs, and distributed conflict resolution.
+- Additional credential types, capability tokens, OAuth/OIDC, role hierarchies,
+  or deny rules.
+- Filesystem move/copy/directory APIs, bulk operations, search, or
+  application-specific endpoints and merge logic.
+
+The current design deliberately uses path-based document identity, observes
+only filesystem states it actually scans, keeps deletion separate from content
+versions, and makes matching grants additive. Revisit these choices only when
+a concrete requirement demonstrates a need to change them.

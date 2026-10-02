@@ -1,0 +1,39 @@
+{
+  "server": {
+    "port": 3000,
+    "host": "127.0.0.1",
+    "storageDir": "./storage",
+    "historyDir": "./storage-history",
+    "reconcileIntervalMs": 5000
+  },
+  "auth": {
+    "jwtSecret": "REPLACE_WITH_A_SECURE_RANDOM_SECRET_KEY",
+    "tokenExpiryDays": 30,
+    "users": [],
+    "principals": {}
+  },
+  "rules": {
+    "ignoreDotfiles": true,
+    "maxFileSizeMb": 10,
+    "allowedExtensions": [
+      ".txt",
+      ".md",
+      ".org",
+      ".json",
+      ".csv",
+      ".log",
+      ".yaml",
+      ".yml"
+    ],
+    "excludePatterns": [
+      "**/node_modules/**",
+      "**/.git/**",
+      "**/.sync/**",
+      "**/private/**"
+    ],
+    "readOnlyPatterns": [
+      "**/archive/**",
+      "**/templates/**"
+    ]
+  }
+}

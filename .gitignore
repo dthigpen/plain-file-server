@@ -126,7 +126,10 @@ dist
 .vscode-test
 
 # Project-specific
+/config.json
 storage/
+storage-history/
+storage.history/
 test-client.html
 
 # pnpm

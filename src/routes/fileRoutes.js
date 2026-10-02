@@ -1,139 +1,106 @@
 const express = require('express');
 const { authenticate } = require('../middleware/auth');
+const { authorize, hasGrant } = require('../middleware/authorization');
 const { validatePath } = require('../middleware/rules');
-const { readFile, writeFileAtomic, deleteFile, moveFile, listFiles, generateETag } = require('../services/fileService');
+const { ifNoneMatchSatisfied } = require('../services/fileService');
 const { getConfig } = require('../config');
 
-const router = express.Router();
+function route(handler) {
+  return (req, res, next) => {
+    try {
+      handler(req, res, next);
+    } catch (error) {
+      next(error);
+    }
+  };
+}
 
-// Apply authentication to all file routes
-router.use(authenticate);
+function setVersionHeaders(res, version) {
+  res.set('ETag', version.etag);
+  res.set('X-Version', String(version.version));
+}
 
-// GET /api/files - List all accessible files
-router.get('/files', (req, res) => {
-  try {
-    const config = getConfig();
-    const files = listFiles(config.server.storageDir, config.rules);
+function sendCurrent(req, res, fileService) {
+  const result = fileService.getCurrent(req.documentPath);
+  res.set('Content-Type', 'text/plain; charset=utf-8');
+  setVersionHeaders(res, result.version);
+
+  const ifNoneMatch = req.headers['if-none-match'];
+  if (ifNoneMatch && ifNoneMatchSatisfied(ifNoneMatch, result.version.etag)) {
+    return res.status(304).end();
+  }
+
+  res.set('Content-Length', String(result.content.length));
+  if (req.method === 'HEAD') {
+    return res.status(200).end();
+  }
+  return res.status(200).send(result.content);
+}
+
+function createFileRoutes(fileService) {
+  const router = express.Router();
+  router.use(authenticate);
+
+  router.get('/files', route((req, res) => {
+    const files = fileService.filesForListing().filter(documentPath =>
+      hasGrant({ grants: req.grants }, 'read', documentPath)
+    );
     res.json({ files });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to list files' });
-  }
-});
+  }));
 
-// GET /api/files/*path - Read a specific file
-router.get('/files/:path(.*)', validatePath, (req, res) => {
-  try {
-    const result = readFile(req.storagePath);
-    
-    if (!result) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-    
-    res.set('Content-Type', 'text/plain; charset=utf-8');
-    res.set('ETag', `"${result.etag}"`);
-    res.send(result.content);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to read file' });
-  }
-});
+  router.get('/files/:path(.*)/history', validatePath(['history']), authorize('history'), route((req, res) => {
+    res.json(fileService.getHistory(req.documentPath));
+  }));
 
-// PUT /api/files/*path - Create or update a file
-router.put('/files/:path(.*)', validatePath, (req, res) => {
-  try {
-    const { content } = req.body;
-    
-    if (content === undefined) {
-      return res.status(400).json({ error: 'Content is required' });
-    }
-    
-    if (typeof content !== 'string') {
+  router.get(
+    '/files/:path(.*)/versions/:version',
+    validatePath(req => ['versions', req.params.version]),
+    authorize('history'),
+    route((req, res) => {
+      const versionNumber = Number(req.params.version);
+      if (!/^[1-9]\d*$/.test(req.params.version) || !Number.isSafeInteger(versionNumber)) {
+        return res.status(400).json({ error: 'Invalid version identifier' });
+      }
+      const result = fileService.getVersion(req.documentPath, versionNumber);
+      res.set('Content-Type', 'text/plain; charset=utf-8');
+      setVersionHeaders(res, result.version);
+      if (req.headers['if-none-match'] && ifNoneMatchSatisfied(req.headers['if-none-match'], result.version.etag)) {
+        return res.status(304).end();
+      }
+      res.set('Content-Length', String(result.content.length));
+      res.send(result.content);
+    })
+  );
+
+  router.head('/files/:path(.*)', validatePath(), authorize('read'), route((req, res) => {
+    sendCurrent(req, res, fileService);
+  }));
+
+  router.get('/files/:path(.*)', validatePath(), authorize('read'), route((req, res) => {
+    sendCurrent(req, res, fileService);
+  }));
+
+  router.put('/files/:path(.*)', validatePath(), authorize('write'), route((req, res) => {
+    const requestContent = typeof req.body === 'string' ? req.body : req.body?.content;
+    if (typeof requestContent !== 'string') {
       return res.status(400).json({ error: 'Content must be a string' });
     }
-    
-    // Check if file exists for ETag validation
-    const existingFile = readFile(req.storagePath);
-    const ifMatch = req.headers['if-match'];
-    
-    if (existingFile) {
-      // File exists, validate ETag
-      if (!ifMatch) {
-        return res.status(428).json({ 
-          error: 'Precondition Required: If-Match header is required for updates',
-          currentETag: `"${existingFile.etag}"`
-        });
-      }
-      
-      // Remove quotes from ETag if present
-      const clientETag = ifMatch.replace(/^"|"$/g, '');
-      
-      if (clientETag !== existingFile.etag) {
-        return res.status(412).json({
-          error: 'Precondition Failed: File on server has changed.',
-          serverETag: `"${existingFile.etag}"`,
-          serverContent: existingFile.content
-        });
-      }
+    const content = Buffer.from(requestContent, 'utf8');
+    const maxBytes = getConfig().rules.maxFileSizeMb * 1024 * 1024;
+    if (content.length > maxBytes) {
+      return res.status(413).json({ error: 'Payload too large' });
     }
-    
-    // Write file atomically
-    writeFileAtomic(req.storagePath, content);
-    
-    // Generate new ETag
-    const newETag = generateETag(content);
-    
-    res.set('ETag', `"${newETag}"`);
-    res.json({
-      success: true,
-      etag: `"${newETag}"`
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to write file' });
-  }
-});
+    const version = fileService.write(req.documentPath, content, req.headers['if-match']);
+    setVersionHeaders(res, version);
+    res.json({ success: true, version: version.version, etag: version.etag });
+  }));
 
-// DELETE /api/files/*path - Delete a file
-router.delete('/files/:path(.*)', validatePath, (req, res) => {
-  try {
-    const ifMatch = req.headers['if-match'];
-    
-    if (ifMatch) {
-      const existingFile = readFile(req.storagePath);
-      
-      if (existingFile) {
-        const clientETag = ifMatch.replace(/^"|"$/g, '');
-        
-        if (clientETag !== existingFile.etag) {
-          return res.status(412).json({
-            error: 'Precondition Failed: File on server has changed.',
-            serverETag: `"${existingFile.etag}"`
-          });
-        }
-      }
-    }
-    
-    const deleted = deleteFile(req.storagePath);
-    
-    if (!deleted) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-    
+  router.delete('/files/:path(.*)', validatePath(), authorize('delete'), route((req, res) => {
+    fileService.delete(req.documentPath, req.headers['if-match']);
     res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to delete file' });
-  }
-});
+  }));
 
-// POST /api/move - Move/rename a file
-router.post('/move', validatePath, (req, res) => {
-  try {
-    moveFile(req.storagePath.old, req.storagePath.new);
-    res.json({ success: true });
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return res.status(404).json({ error: 'Source file not found' });
-    }
-    res.status(500).json({ error: 'Failed to move file' });
-  }
-});
+  return router;
+}
 
-module.exports = router;
+module.exports = { createFileRoutes };

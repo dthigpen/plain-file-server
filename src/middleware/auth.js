@@ -1,4 +1,5 @@
-const { verifyToken } = require('../services/authService');
+const { principalForUser, verifyToken } = require('../services/authService');
+const { getConfig } = require('../config');
 
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -14,7 +15,19 @@ function authenticate(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
   
-  req.user = decoded;
+  req.principalId = decoded.sub || decoded.username;
+  const config = getConfig();
+  const configuredPrincipal = config.auth.principals && Object.hasOwn(config.auth.principals, req.principalId)
+    ? config.auth.principals[req.principalId]
+    : undefined;
+  const user = config.auth.users.find(candidate =>
+    (candidate.principal || candidate.username) === req.principalId
+  );
+  if (!configuredPrincipal && !user) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+  req.grants = configuredPrincipal?.grants ||
+    principalForUser(user, config).grants;
   next();
 }
 
