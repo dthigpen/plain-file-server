@@ -1,0 +1,17 @@
+services:
+  plain-file-server:
+    image: ghcr.io/dthigpen/plain-file-server:latest
+    container_name: plain-file-server
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./config/config.json:/config/config.json:ro
+      - ./data:/data
+      - ./history:/history
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true

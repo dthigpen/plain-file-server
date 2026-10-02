@@ -37,8 +37,8 @@ offline-client sync or application-specific merging.
 
 ## Requirements
 
-- Node.js 20 or newer
-- npm
+- Node.js 20 or newer and npm when running from source
+- Docker or Podman when running the container image
 - A modern browser for the example client
 
 ## First-time setup
@@ -116,6 +116,47 @@ any name that has an extension, extensionless names only, or extensionless
 names plus a specific extension allowlist. In the config file these modes are
 represented by `["*"]`, `[".*"]`, `[]`, or an explicit list such as
 `[".txt", ".md"]`, respectively.
+
+## Run the container image
+
+The project publishes multi-architecture images for `linux/amd64` and
+`linux/arm64` to
+[`ghcr.io/dthigpen/plain-file-server`](https://github.com/dthigpen/plain-file-server/pkgs/container/plain-file-server)
+on pushes to `main` and version tags. If the package is private, authenticate
+with `ghcr.io` before pulling it.
+
+Create persistent directories and use the image's setup wizard to generate a
+private configuration. The storage and history paths below are container
+paths; history is deliberately stored outside the document directory.
+
+```sh
+mkdir -p config data history
+docker pull ghcr.io/dthigpen/plain-file-server:latest
+docker run --rm -it \
+  --user "$(id -u):$(id -g)" \
+  -v "$PWD/config:/config" \
+  -v "$PWD/data:/data" \
+  -v "$PWD/history:/history" \
+  ghcr.io/dthigpen/plain-file-server:latest \
+  npm run setup -- --config /config/config.json
+```
+
+In the wizard, bind to `0.0.0.0`, use `/data` for storage, and `/history` for
+history. `compose.yaml` keeps the published API port on host loopback so it
+can be reached by a local reverse proxy without exposing it directly to the
+network:
+
+```sh
+docker compose up -d
+curl http://127.0.0.1:3000/health
+```
+
+Set `PUID` and `PGID` in the environment when the persistent directories are
+owned by a user other than UID/GID 1000. With rootless Podman, use the
+appropriate `keep-id` user-namespace option so the image's `node` user can
+write to the mounted data and history directories. To build locally instead,
+run `podman build -t localhost/plain-file-server .` or
+`docker build -t localhost/plain-file-server .`.
 
 ## Start the server
 
