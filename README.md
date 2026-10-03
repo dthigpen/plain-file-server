@@ -117,46 +117,51 @@ names plus a specific extension allowlist. In the config file these modes are
 represented by `["*"]`, `[".*"]`, `[]`, or an explicit list such as
 `[".txt", ".md"]`, respectively.
 
-## Run the container image
+## Build and run the container locally
 
-The project publishes multi-architecture images for `linux/amd64` and
-`linux/arm64` to
-[`ghcr.io/dthigpen/plain-file-server`](https://github.com/dthigpen/plain-file-server/pkgs/container/plain-file-server)
-on pushes to `main` and version tags. If the package is private, authenticate
-with `ghcr.io` before pulling it.
+Build the image from this checkout on the machine that will run the service.
+The build downloads the public `node:22-bookworm-slim` base image, then installs
+the server's production npm dependencies into the local image. It does not
+publish the image or require a GitHub Container Registry login.
 
-Create persistent directories and use the image's setup wizard to generate a
-private configuration. The storage and history paths below are container
-paths; history is deliberately stored outside the document directory.
+```sh
+podman build -t localhost/plain-file-server:latest .
+```
+
+For an initial setup, provide persistent config, document, and history
+directories as mounts. The storage and history paths inside the container are
+`/data` and `/history`; keep history outside any directory synchronized by
+Syncthing.
 
 ```sh
 mkdir -p config data history
-docker pull ghcr.io/dthigpen/plain-file-server:latest
-docker run --rm -it \
-  --user "$(id -u):$(id -g)" \
-  -v "$PWD/config:/config" \
-  -v "$PWD/data:/data" \
-  -v "$PWD/history:/history" \
-  ghcr.io/dthigpen/plain-file-server:latest \
+podman run --rm -it \
+  --userns=keep-id:uid=1000,gid=1000 \
+  -v "$PWD/config:/config:Z" \
+  -v "$PWD/data:/data:Z" \
+  -v "$PWD/history:/history:Z" \
+  localhost/plain-file-server:latest \
   npm run setup -- --config /config/config.json
 ```
 
 In the wizard, bind to `0.0.0.0`, use `/data` for storage, and `/history` for
-history. `compose.yaml` keeps the published API port on host loopback so it
-can be reached by a local reverse proxy without exposing it directly to the
-network:
+history. The `compose.yaml` example builds the image from the local checkout
+and binds the API to host loopback so a local reverse proxy can reach it
+without exposing it directly to the network. Its `keep-id` user namespace is
+for rootless Podman; Docker Compose users can remove that setting:
 
 ```sh
-docker compose up -d
+podman compose up --build -d
 curl http://127.0.0.1:3000/health
 ```
 
-Set `PUID` and `PGID` in the environment when the persistent directories are
-owned by a user other than UID/GID 1000. With rootless Podman, use the
-appropriate `keep-id` user-namespace option so the image's `node` user can
-write to the mounted data and history directories. To build locally instead,
-run `podman build -t localhost/plain-file-server .` or
-`docker build -t localhost/plain-file-server .`.
+If `podman compose` is unavailable, the Podman Compose provider is not
+installed; the direct `podman build` and `podman run` commands above do not
+require it. For Docker, build with
+`docker build -t localhost/plain-file-server:latest .` and use the equivalent
+Docker commands. In rootless Podman, run as the account that owns the
+persistent directories and preserve the `keep-id` user namespace so the
+image's `node` user can write to them.
 
 ## Start the server
 

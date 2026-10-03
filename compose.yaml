@@ -1,9 +1,12 @@
 services:
   plain-file-server:
-    image: ghcr.io/dthigpen/plain-file-server:latest
+    image: localhost/plain-file-server:latest
+    build:
+      context: .
     container_name: plain-file-server
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
+    userns_mode: keep-id
     ports:
       - "127.0.0.1:3000:3000"
     volumes:
