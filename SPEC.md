@@ -69,11 +69,18 @@ request observes external changes without waiting for the next scan.
   separate document with its own history.
 - Unchanged file: do nothing.
 
-The default full-scan interval is 5 seconds and can be changed with
+The default full-scan interval is 60 seconds and can be changed with
 `server.reconcileIntervalMs`. Polling only guarantees that states observed by
 the server are versioned; multiple edits between scans may be observed as one
 change. Filesystem notifications, intermediate-state capture, and change
 feeds are not part of this version.
+
+Periodic reconciliation compares file size and modification/change timestamps
+against the last observed state before reading file contents. This avoids
+re-reading unchanged documents on every scan. API operations on an individual
+path still read and reconcile its current contents immediately. The next scan
+is scheduled only after the current scan finishes, so a slow scan does not
+cause immediate back-to-back scans.
 
 ### Deletion and recreation
 
@@ -125,7 +132,7 @@ A separate config file may be selected with
     "host": "127.0.0.1",
     "storageDir": "./storage",
     "historyDir": "./storage-history",
-    "reconcileIntervalMs": 5000
+    "reconcileIntervalMs": 60000
   },
   "auth": {
     "jwtSecret": "replace-with-a-long-random-secret",
@@ -162,7 +169,7 @@ A separate config file may be selected with
 absolute, or home-relative using `~` or `~/path` (for example,
 `~/syncthing/household`). Home-relative paths are expanded to an absolute path
 before use. Other `~name` forms are rejected. The server creates missing
-directories. `reconcileIntervalMs` defaults to 5000 and must be at least 100
+directories. `reconcileIntervalMs` defaults to 60000 and must be at least 100
 milliseconds.
 
 Global rules apply independently of principal grants:

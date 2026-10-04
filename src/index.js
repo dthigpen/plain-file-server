@@ -46,21 +46,26 @@ function startServer(configPath = path.join(process.cwd(), 'config.json')) {
   const config = loadConfig(configPath);
   const fileService = new FileService(config);
   const app = createApp(config, fileService);
-  const { port, host, reconcileIntervalMs = 5000 } = config.server;
-  const reconcileTimer = setInterval(() => {
+  const { port, host, reconcileIntervalMs = 60000 } = config.server;
+  let reconcileTimer;
+  const reconcilePeriodically = () => {
     try {
       fileService.reconcile();
     } catch (error) {
       console.error('Filesystem reconciliation failed:', error);
+    } finally {
+      reconcileTimer = setTimeout(reconcilePeriodically, reconcileIntervalMs);
+      reconcileTimer.unref();
     }
-  }, reconcileIntervalMs);
+  };
+  reconcileTimer = setTimeout(reconcilePeriodically, reconcileIntervalMs);
   reconcileTimer.unref();
 
   const server = app.listen(port, host, () => {
     console.log(`Plain file server running on http://${host}:${port}`);
     console.log(`Storage directory: ${fileService.storageRoot}`);
   });
-  server.on('close', () => clearInterval(reconcileTimer));
+  server.on('close', () => clearTimeout(reconcileTimer));
   return server;
 }
 

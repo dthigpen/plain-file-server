@@ -39,6 +39,20 @@ function isWithin(parent, candidate) {
   return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
+function fileState(stat) {
+  return {
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    ctimeMs: stat.ctimeMs
+  };
+}
+
+function sameFileState(left, right) {
+  return left?.size === right.size &&
+    left?.mtimeMs === right.mtimeMs &&
+    left?.ctimeMs === right.ctimeMs;
+}
+
 function parseEntityTags(header) {
   const normalized = header.trim();
   if (normalized === '*') {
@@ -180,7 +194,7 @@ class FileService {
     return `"${hash.digest('hex')}"`;
   }
 
-  addVersion(documentPath, content) {
+  addVersion(documentPath, content, state) {
     let document = this.getMetadata(documentPath);
     if (!document) {
       document = { versions: [], deletedAt: null };
@@ -189,6 +203,10 @@ class FileService {
 
     const previous = document.versions.at(-1);
     if (previous && !document.deletedAt && this.readVersion(documentPath, previous).equals(content)) {
+      if (state && !sameFileState(document.fileState, state)) {
+        document.fileState = state;
+        this.saveIndex();
+      }
       return previous;
     }
 
@@ -202,6 +220,9 @@ class FileService {
     atomicWrite(this.getVersionPath(documentPath, version), content);
     document.versions.push(metadata);
     document.deletedAt = null;
+    if (state) {
+      document.fileState = state;
+    }
     this.saveIndex();
     return metadata;
   }
@@ -210,6 +231,7 @@ class FileService {
     const document = this.getMetadata(documentPath);
     if (document && !document.deletedAt) {
       document.deletedAt = new Date().toISOString();
+      delete document.fileState;
       this.saveIndex();
     }
   }
@@ -218,7 +240,7 @@ class FileService {
     return resolveDocumentPath(this.storageRoot, documentPath);
   }
 
-  reconcileDocument(documentPath) {
+  reconcileDocument(documentPath, { skipUnchanged = false } = {}) {
     let filePath;
     try {
       filePath = this.pathFor(documentPath);
@@ -243,6 +265,19 @@ class FileService {
     if (!stat.isFile()) {
       throw new HttpError(400, 'Document path is not a file');
     }
+    const state = fileState(stat);
+    const document = this.getMetadata(documentPath);
+    if (
+      skipUnchanged &&
+      document &&
+      !document.deletedAt &&
+      document.fileState &&
+      document.fileState.size === state.size &&
+      document.fileState.mtimeMs === state.mtimeMs &&
+      document.fileState.ctimeMs === state.ctimeMs
+    ) {
+      return { unchanged: true };
+    }
     let content;
     try {
       content = fs.readFileSync(filePath);
@@ -253,7 +288,7 @@ class FileService {
       }
       throw error;
     }
-    const version = this.addVersion(documentPath, content);
+    const version = this.addVersion(documentPath, content, state);
     return { filePath, content, version };
   }
 
@@ -270,6 +305,12 @@ class FileService {
 
     for (const name of entries) {
       const documentPath = parentPath ? `${parentPath}/${name}` : name;
+      if (
+        name.toLowerCase().startsWith('.pfs-tmp-') ||
+        (this.config.rules.ignoreDotfiles && name.startsWith('.'))
+      ) {
+        continue;
+      }
       const targetPath = path.join(directory, name);
       let stat;
       try {
@@ -301,9 +342,14 @@ class FileService {
     }
     for (const documentPath of existing) {
       if (isDocumentAllowed(documentPath, this.config.rules)) {
-        this.reconcileDocument(documentPath);
+        if (!this.reconcileDocument(documentPath, { skipUnchanged: true })) {
+          existing.delete(documentPath);
+        }
       }
     }
+    return [...existing]
+      .filter(documentPath => isDocumentAllowed(documentPath, this.config.rules))
+      .sort();
   }
 
   getCurrent(documentPath) {
@@ -368,7 +414,7 @@ class FileService {
       mode = fs.statSync(filePath).mode & 0o777;
     }
     atomicWrite(filePath, content, mode);
-    const version = this.addVersion(documentPath, content);
+    const version = this.addVersion(documentPath, content, fileState(fs.statSync(filePath)));
     return version;
   }
 
@@ -387,22 +433,7 @@ class FileService {
   }
 
   filesForListing() {
-    this.reconcile();
-    const files = [];
-    for (const documentPath of this.listFiles()) {
-      try {
-        if (fs.lstatSync(this.pathFor(documentPath)).isFile()) {
-          files.push(documentPath);
-        }
-      } catch (error) {
-        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
-          this.markDeleted(documentPath);
-          continue;
-        }
-        throw error;
-      }
-    }
-    return files;
+    return this.reconcile();
   }
 }
 

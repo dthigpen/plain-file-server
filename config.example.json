@@ -4,7 +4,7 @@
     "host": "127.0.0.1",
     "storageDir": "./storage",
     "historyDir": "./storage-history",
-    "reconcileIntervalMs": 5000
+    "reconcileIntervalMs": 60000
   },
   "auth": {
     "jwtSecret": "REPLACE_WITH_A_SECURE_RANDOM_SECRET_KEY",

@@ -137,6 +137,32 @@ test('version lifecycle retains history through external change, deletion, recre
   assert.equal(restarted.getVersion('doc.txt', 2).content.toString(), 'two');
 });
 
+test('periodic reconciliation skips unchanged file reads and versions changed files', t => {
+  const { config, service } = createFileService(t);
+  const contentPath = path.join(config.server.storageDir, 'doc.txt');
+  service.write('doc.txt', Buffer.from('initial content'));
+  service.reconcile();
+
+  const originalReadFileSync = fs.readFileSync;
+  fs.readFileSync = (filePath, ...args) => {
+    if (filePath === contentPath) {
+      throw new Error('unchanged document should not be read during periodic reconciliation');
+    }
+    return originalReadFileSync(filePath, ...args);
+  };
+  try {
+    service.reconcile();
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+  }
+  assert.deepEqual(service.getMetadata('doc.txt').versions.map(version => version.version), [1]);
+
+  fs.writeFileSync(contentPath, 'changed external content');
+  service.reconcile();
+  assert.deepEqual(service.getMetadata('doc.txt').versions.map(version => version.version), [1, 2]);
+  assert.equal(service.getVersion('doc.txt', 2).content.toString(), 'changed external content');
+});
+
 test('failed history snapshot leaves no false version and reconciliation recovers the file write', t => {
   const { config, service } = createFileService(t);
   service.write('doc.txt', Buffer.from('one'));

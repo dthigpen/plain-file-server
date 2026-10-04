@@ -284,6 +284,10 @@ historical-version requests remain available to principals with `history`.
 External edits and deletions are reconciled into history during a path request
 or the periodic scan.
 
+The periodic scan defaults to once per minute. It checks filesystem metadata
+for known files and reads content only when size or timestamps change.
+Path-specific API reads still reconcile the requested file immediately.
+
 ## Test it with the example client
 
 The example client is a small browser UI for login, listing files, reading,

@@ -18,7 +18,7 @@ function createDefaultConfig() {
       host: '127.0.0.1',
       storageDir: './storage',
       historyDir: './storage-history',
-      reconcileIntervalMs: 5000
+      reconcileIntervalMs: 60000
     },
     auth: {
       jwtSecret: crypto.randomBytes(48).toString('base64url'),
