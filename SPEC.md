@@ -193,12 +193,12 @@ Global rules apply independently of principal grants:
 
 ### Authentication
 
-`POST /api/login` authenticates a configured username and bcrypt password hash
+`POST /api/v1/login` authenticates a configured username and bcrypt password hash
 and returns a signed JWT. The JWT identifies a principal; credentials are not
 the authorization policy. Login is rate limited. Requests to file endpoints
 must include `Authorization: Bearer <token>`.
 
-Authentication failure returns 401. `GET /health` and `POST /api/login` do not
+Authentication failure returns 401. `GET /health` and `POST /api/v1/login` do not
 require a token.
 
 ### Principals and grants
@@ -231,7 +231,7 @@ authorization behavior.
 
 ## 5. Document paths and filesystem boundary
 
-The path after `/api/files/` is a URL representation of a logical document
+The path after `/api/v1/files/` is a URL representation of a logical document
 path, not a filesystem path. `/` separates components. Each component is
 percent-decoded as UTF-8 before validation; query strings are not part of the
 path, and URL fragments are never sent to the server. Ordinary Unicode names
@@ -258,13 +258,18 @@ whose last component is literally `history`).
 
 ## 6. HTTP API
 
-All routes below are under `/api`. File routes require authentication and the
-operation-specific grant. JSON error responses have an `error` field; some
-conditional-write errors also include current server metadata.
+The canonical API base is `/api/v1`. File routes require authentication and
+the operation-specific grant. JSON error responses have an `error` field;
+some conditional-write errors also include current server metadata.
+
+For migration compatibility, the server also serves the same routes under
+`/api` without a version segment. New clients should use `/api/v1`; the
+unversioned paths are deprecated and may be removed in a future breaking
+release. `/health` remains outside the versioned API.
 
 ### Login
 
-`POST /api/login`
+`POST /api/v1/login`
 
 Request JSON:
 
@@ -282,13 +287,13 @@ Missing credentials return 400; invalid credentials return 401.
 
 ### List eligible files
 
-`GET /api/files` requires authentication. It returns
+`GET /api/v1/files` requires authentication. It returns
 `{"files":["notes/today.md"]}` containing eligible current document paths for
 which the principal has `read`. Paths hidden by global rules are omitted.
 
 ### Read the current document
 
-`GET /api/files/{path}` and `HEAD /api/files/{path}` require `read`.
+`GET /api/v1/files/{path}` and `HEAD /api/v1/files/{path}` require `read`.
 
 `GET` returns the current file bytes as `text/plain; charset=utf-8`.
 `HEAD` returns the same status and metadata without a body. Both return:
@@ -307,7 +312,7 @@ extensions return 415; unsafe paths return 400.
 
 ### Create or update a document
 
-`PUT /api/files/{path}` requires `write`. The body may be raw `text/plain`
+`PUT /api/v1/files/{path}` requires `write`. The body may be raw `text/plain`
 text or JSON of the form `{"content":"..."}`. A successful request returns
 200 with a JSON body containing `success`, `version`, and `etag`; it also
 returns the new `ETag` and `X-Version` headers.
@@ -326,7 +331,7 @@ returns the new `ETag` and `X-Version` headers.
 
 ### Delete a document
 
-`DELETE /api/files/{path}` requires `delete`. `If-Match` is optional for
+`DELETE /api/v1/files/{path}` requires `delete`. `If-Match` is optional for
 compatibility; when supplied, it must strongly match the current ETag or the
 request returns 412. Deletion returns `{"success":true}`. Missing documents
 return 404. The current file is removed, but all content versions remain
@@ -334,7 +339,7 @@ available through history. Deletion does not consume a version number.
 
 ### List document history
 
-`GET /api/files/{path}/history` requires `history`. It returns versions in
+`GET /api/v1/files/{path}/history` requires `history`. It returns versions in
 ascending version order:
 
 ```json
@@ -358,7 +363,7 @@ history. A path with no recorded versions returns 404.
 
 ### Retrieve a historical version
 
-`GET /api/files/{path}/versions/{version}` requires `history`, where `version`
+`GET /api/v1/files/{path}/versions/{version}` requires `history`, where `version`
 is a positive decimal integer. It returns the exact stored bytes as
 `text/plain; charset=utf-8`, with that version's `ETag`, `X-Version`, and
 `Content-Length`. `If-None-Match` returns 304 when it matches. An unknown

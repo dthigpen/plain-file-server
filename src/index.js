@@ -17,8 +17,11 @@ function createApp(config = getConfig(), fileService = new FileService(config)) 
   app.use(express.text({ type: 'text/plain', limit: parserLimit }));
   app.use(express.json({ limit: parserLimit }));
   app.use(express.urlencoded({ extended: true, limit: parserLimit }));
+  const fileRoutes = createFileRoutes(fileService);
+  app.use('/api/v1', authRoutes);
+  app.use('/api/v1', fileRoutes);
   app.use('/api', authRoutes);
-  app.use('/api', createFileRoutes(fileService));
+  app.use('/api', fileRoutes);
 
   app.get('/health', (req, res) => {
     res.json({ status: 'ok' });

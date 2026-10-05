@@ -51,8 +51,9 @@ function parseDocumentPath(rawPath) {
 
 function rawDocumentPath(req, suffix = []) {
   const pathname = req.originalUrl.split('?')[0];
-  const prefix = '/api/files/';
-  if (!pathname.startsWith(prefix)) {
+  const prefixes = ['/api/v1/files/', '/api/files/'];
+  const prefix = prefixes.find(candidate => pathname.startsWith(candidate));
+  if (!prefix) {
     throw new HttpError(400, 'Document path is required');
   }
 

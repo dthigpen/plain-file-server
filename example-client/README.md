@@ -32,7 +32,7 @@ This is a local development/testing tool for the Plain File Server API. It demon
    # Then visit http://localhost:8080
    ```
 
-3. Configure the server URL (default: `http://127.0.0.1:3000/api`)
+3. Configure the server URL (default: `http://127.0.0.1:3000/api/v1`)
 
 4. Login with your server credentials
 
@@ -47,7 +47,8 @@ This is a local development/testing tool for the Plain File Server API. It demon
 
 ## API Integration
 
-The client demonstrates these API patterns:
+The client demonstrates these API patterns using the versioned API base
+`http://127.0.0.1:3000/api/v1`:
 
 ### Authentication
 ```javascript

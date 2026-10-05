@@ -191,11 +191,14 @@ only.
 
 ## Try the API with curl
 
+Use `/api/v1` for new clients. The unversioned `/api` paths remain available
+as a compatibility alias for existing clients.
+
 The following examples assume the default port and the admin username and
 password you chose in the setup wizard. Log in and copy the returned token:
 
 ```sh
-curl -sS http://127.0.0.1:3000/api/login \
+curl -sS http://127.0.0.1:3000/api/v1/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"your-setup-password"}'
 ```
@@ -205,7 +208,7 @@ Set `TOKEN` to the token from the login response, then list accessible files:
 ```sh
 TOKEN='paste-token-from-login-response'
 
-curl -i http://127.0.0.1:3000/api/files \
+curl -i http://127.0.0.1:3000/api/v1/files \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -213,7 +216,7 @@ Create a new document. A new path starts at version 1 and does not need
 `If-Match`:
 
 ```sh
-curl -i -X PUT http://127.0.0.1:3000/api/files/notes/today.txt \
+curl -i -X PUT http://127.0.0.1:3000/api/v1/files/notes/today.txt \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"content":"First note\n"}'
@@ -223,7 +226,7 @@ Read the current document and note its `ETag` and `X-Version` response
 headers:
 
 ```sh
-curl -i http://127.0.0.1:3000/api/files/notes/today.txt \
+curl -i http://127.0.0.1:3000/api/v1/files/notes/today.txt \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -233,7 +236,7 @@ Paste the entire quoted value (for example, `"abc123..."`) into `ETAG`:
 ```sh
 ETAG='"paste-the-entire-quoted-etag-here"'
 
-curl -i -X PUT http://127.0.0.1:3000/api/files/notes/today.txt \
+curl -i -X PUT http://127.0.0.1:3000/api/v1/files/notes/today.txt \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: text/plain' \
   -H "If-Match: $ETAG" \
@@ -250,13 +253,13 @@ Check metadata without downloading the body, list history, and retrieve a
 specific historical version:
 
 ```sh
-curl -I http://127.0.0.1:3000/api/files/notes/today.txt \
+curl -I http://127.0.0.1:3000/api/v1/files/notes/today.txt \
   -H "Authorization: Bearer $TOKEN"
 
-curl -sS http://127.0.0.1:3000/api/files/notes/today.txt/history \
+curl -sS http://127.0.0.1:3000/api/v1/files/notes/today.txt/history \
   -H "Authorization: Bearer $TOKEN"
 
-curl -i http://127.0.0.1:3000/api/files/notes/today.txt/versions/1 \
+curl -i http://127.0.0.1:3000/api/v1/files/notes/today.txt/versions/1 \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -265,7 +268,7 @@ Set `ETAG` to the most recent ETag returned by `GET` or `PUT` to demonstrate a
 instead:
 
 ```sh
-curl -i http://127.0.0.1:3000/api/files/notes/today.txt \
+curl -i http://127.0.0.1:3000/api/v1/files/notes/today.txt \
   -H "Authorization: Bearer $TOKEN" \
   -H "If-None-Match: $ETAG"
 ```
@@ -274,7 +277,7 @@ A match returns `304 Not Modified`. Deletion preserves history; `If-Match` is
 optional for `DELETE`, but recommended:
 
 ```sh
-curl -i -X DELETE http://127.0.0.1:3000/api/files/notes/today.txt \
+curl -i -X DELETE http://127.0.0.1:3000/api/v1/files/notes/today.txt \
   -H "Authorization: Bearer $TOKEN" \
   -H "If-Match: $ETAG"
 ```
@@ -307,7 +310,7 @@ historical-version endpoints; use the curl commands above to inspect those.
    ```
 
 3. Open <http://127.0.0.1:8080> in your browser.
-4. Leave the server URL set to `http://127.0.0.1:3000/api` and click **Save
+4. Leave the server URL set to `http://127.0.0.1:3000/api/v1` and click **Save
    Configuration** if you changed it.
 5. Log in using the username and password you created in the setup wizard
    (the initial username defaults to `admin`).

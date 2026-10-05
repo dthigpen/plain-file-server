@@ -97,7 +97,7 @@
         <h2>Server Configuration</h2>
         <div class="form-group">
             <label>Server URL:</label>
-            <input type="text" id="serverUrl" value="http://127.0.0.1:3000/api" placeholder="http://your-server.com/api">
+            <input type="text" id="serverUrl" value="http://127.0.0.1:3000/api/v1" placeholder="http://your-server.com/api/v1">
         </div>
         <button onclick="saveConfig()">Save Configuration</button>
     </div>
@@ -159,7 +159,7 @@
     </div>
 
     <script>
-        let API_BASE = localStorage.getItem('serverUrl') || 'http://127.0.0.1:3000/api';
+        let API_BASE = localStorage.getItem('serverUrl') || 'http://127.0.0.1:3000/api/v1';
         let authToken = localStorage.getItem('authToken');
         let selectedFile = null;
 

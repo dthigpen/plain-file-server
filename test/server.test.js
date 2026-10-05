@@ -74,6 +74,7 @@ test('versioned document API reconciles files, guards paths, and authorizes oper
   });
 
   const baseUrl = `http://127.0.0.1:${server.address().port}/api`;
+  const versionedBaseUrl = `http://127.0.0.1:${server.address().port}/api/v1`;
   const tokenFor = principal => jwt.sign({ sub: principal }, secret);
   const login = await fetch(`${baseUrl}/login`, {
     method: 'POST',
@@ -83,6 +84,13 @@ test('versioned document API reconciles files, guards paths, and authorizes oper
   assert.equal(login.status, 200);
   const loginResult = await login.json();
   assert.equal(loginResult.expiresInDays, 2);
+  const versionedLogin = await fetch(`${versionedBaseUrl}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password: 'password' })
+  });
+  assert.equal(versionedLogin.status, 200);
+  assert.equal(typeof (await versionedLogin.json()).token, 'string');
   const wrongPassword = await fetch(`${baseUrl}/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -116,6 +124,14 @@ test('versioned document API reconciles files, guards paths, and authorizes oper
   const initialEtag = initial.headers.get('etag');
   assert.ok(initialEtag);
   assert.equal(initial.headers.get('x-version'), '1');
+
+  const versionedInitial = await fetch(
+    `${versionedBaseUrl}/files/notes/today.txt`,
+    { headers: adminHeaders }
+  );
+  assert.equal(versionedInitial.status, 200);
+  assert.equal(await versionedInitial.text(), 'initial');
+  assert.equal(versionedInitial.headers.get('etag'), initialEtag);
 
   const missingWriteCondition = await fetch(url('/files/notes/today.txt'), {
     method: 'PUT',
