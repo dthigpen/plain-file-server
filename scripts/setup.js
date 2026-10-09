@@ -18,7 +18,9 @@ function createDefaultConfig() {
       host: '127.0.0.1',
       storageDir: './storage',
       historyDir: './storage-history',
-      reconcileIntervalMs: 60000
+      reconcileIntervalMs: 60000,
+      allowedOrigins: ['*'],
+      trustProxy: false
     },
     auth: {
       jwtSecret: crypto.randomBytes(48).toString('base64url'),
@@ -298,6 +300,57 @@ async function configureServer(config, prompt) {
       ? null
       : 'Enter an integer of at least 100 milliseconds.'
   ));
+
+  const originsDefault = Array.isArray(server.allowedOrigins) && !server.allowedOrigins.includes('*')
+    ? server.allowedOrigins.join(', ')
+    : '';
+  const originsInput = await prompt.value(
+    'Allowed browser origins, comma-separated (blank = allow any origin)',
+    originsDefault,
+    value => parseOriginList(value).some(origin => origin.includes('*'))
+      ? 'Origins must be exact (no wildcards); leave blank to allow any origin.'
+      : null
+  );
+  const origins = parseOriginList(originsInput);
+  server.allowedOrigins = origins.length ? origins : ['*'];
+
+  server.trustProxy = parseTrustProxy(await prompt.value(
+    'Trust proxy for client IP and rate limiting (false, true, loopback, a hop count, or a comma-separated list)',
+    trustProxyToInput(server.trustProxy),
+    () => null
+  ));
+}
+
+function parseOriginList(value) {
+  return String(value)
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+}
+
+function trustProxyToInput(value) {
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+  return value === undefined ? 'false' : String(value);
+}
+
+function parseTrustProxy(value) {
+  const text = String(value).trim();
+  if (text === '' || text.toLowerCase() === 'false') {
+    return false;
+  }
+  if (text.toLowerCase() === 'true') {
+    return true;
+  }
+  if (/^\d+$/.test(text)) {
+    return Number(text);
+  }
+  const list = parseOriginList(text);
+  if (list.length === 0) {
+    return false;
+  }
+  return list.length === 1 ? list[0] : list;
 }
 
 async function addUser(config, prompt) {

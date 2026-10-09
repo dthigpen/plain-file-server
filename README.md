@@ -69,7 +69,8 @@ commit your generated config, passwords, hashes, or signing secret.
 
 Run `npm run setup` again at any time. The menu lets you:
 
-- Change the bind address, port, storage paths, and filesystem scan interval.
+- Change the bind address, port, storage paths, filesystem scan interval,
+  allowed browser origins (CORS), and proxy trust.
 - Add users, change a user's password, manage their principal grants, or remove
   users.
 - Grant access to an exact path such as `/budget.txt`, a subtree such as
@@ -182,12 +183,35 @@ Expected response:
 {"status":"ok"}
 ```
 
-The default host is loopback-only. The current server enables permissive
-cross-origin requests; before exposing it to browsers outside a trusted local
-setup, restrict allowed origins in the server or at a trusted proxy. Use HTTPS
-and a trusted reverse proxy or private network for remote access. The example
-client stores its JWT in browser `localStorage` and is for local development
-only.
+The default host is loopback-only. Configure cross-origin access with
+`server.allowedOrigins`:
+
+- omit it to reflect any origin (permissive; a startup warning is logged);
+- `["*"]` to allow all origins explicitly;
+- `[]` to block cross-origin browser requests entirely;
+- an exact list such as
+  `["https://you.github.io", "https://host.tailnet.ts.net"]` to allowlist
+  specific browser origins.
+
+`server.corsMaxAge` (seconds) caches CORS preflight responses so polling
+clients avoid a preflight per request. When running behind a reverse proxy
+(nginx, Caddy, Tailscale Serve, etc.), set `server.trustProxy` so client IPs
+and login rate limiting work correctly; it accepts `true`, a hop count, a
+string such as `"loopback"`, or an array of proxy addresses, mirroring
+Express's `trust proxy` setting. Use HTTPS and a trusted reverse proxy or
+private network for remote access. The example client stores its JWT in browser
+`localStorage` and is for local development only.
+
+### Reaching the server over Tailscale (or another VPN)
+
+- Set `server.host` to the tailnet interface address (or `0.0.0.0`, relying on
+  the tailnet and firewall for exposure) instead of the loopback default.
+- Terminate HTTPS with Tailscale Serve (or a reverse proxy with a certificate)
+  so a browser on an HTTPS page can reach the API without mixed-content errors,
+  and enable `server.trustProxy`.
+- Add the web client's origin (for example a GitHub Pages URL) to
+  `server.allowedOrigins`; the stable `https://host.tailnet.ts.net` origin from
+  Tailscale Serve is convenient to allowlist.
 
 ## Try the API with curl
 

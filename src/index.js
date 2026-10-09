@@ -6,13 +6,46 @@ const authRoutes = require('./routes/authRoutes');
 const { createFileRoutes } = require('./routes/fileRoutes');
 const { FileService } = require('./services/fileService');
 
+function corsOriginOption(allowedOrigins) {
+  // Omitted: reflect any origin (permissive; preserves prior behavior).
+  if (allowedOrigins === undefined) {
+    return true;
+  }
+  // Explicit wildcard: allow all origins.
+  if (allowedOrigins.includes('*')) {
+    return true;
+  }
+  // Empty list: no cross-origin access (same-origin / non-browser only).
+  if (allowedOrigins.length === 0) {
+    return false;
+  }
+  const allowed = new Set(allowedOrigins);
+  return (origin, callback) => {
+    // `origin` is undefined for same-origin and non-browser requests.
+    callback(null, !origin || allowed.has(origin));
+  };
+}
+
 function createApp(config = getConfig(), fileService = new FileService(config)) {
   fileService.reconcile();
   const app = express();
   const parserLimit = `${config.rules.maxFileSizeMb + 1}mb`;
 
+  if (config.server.trustProxy !== undefined) {
+    app.set('trust proxy', config.server.trustProxy);
+  }
+
+  if (config.server.allowedOrigins === undefined) {
+    console.warn(
+      'CORS: no server.allowedOrigins configured; reflecting any origin. ' +
+      'Set server.allowedOrigins to restrict browser access.'
+    );
+  }
+
   app.use(cors({
-    exposedHeaders: ['ETag', 'X-Version']
+    origin: corsOriginOption(config.server.allowedOrigins),
+    exposedHeaders: ['ETag', 'X-Version'],
+    maxAge: config.server.corsMaxAge ?? 600
   }));
   app.use(express.text({ type: 'text/plain', limit: parserLimit }));
   app.use(express.json({ limit: parserLimit }));
@@ -89,4 +122,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { createApp, startServer };
+module.exports = { createApp, startServer, corsOriginOption };

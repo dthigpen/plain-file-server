@@ -132,7 +132,10 @@ A separate config file may be selected with
     "host": "127.0.0.1",
     "storageDir": "./storage",
     "historyDir": "./storage-history",
-    "reconcileIntervalMs": 60000
+    "reconcileIntervalMs": 60000,
+    "allowedOrigins": [],
+    "corsMaxAge": 600,
+    "trustProxy": false
   },
   "auth": {
     "jwtSecret": "replace-with-a-long-random-secret",
@@ -171,6 +174,23 @@ absolute, or home-relative using `~` or `~/path` (for example,
 before use. Other `~name` forms are rejected. The server creates missing
 directories. `reconcileIntervalMs` defaults to 60000 and must be at least 100
 milliseconds.
+
+`allowedOrigins` controls browser CORS access and is optional:
+
+- omitted allows any origin (permissive; the server logs a startup warning);
+- `["*"]` allows any origin explicitly;
+- `[]` allows no cross-origin browser requests (same-origin and non-browser
+  clients only);
+- an explicit list of exact origins (for example
+  `["https://app.example.com"]`) allows only those origins. Wildcards other
+  than a lone `"*"` are rejected.
+
+`corsMaxAge` is an optional non-negative integer (seconds, default 600) that
+sets how long browsers may cache CORS preflight responses. `trustProxy` is an
+optional Express `trust proxy` value (boolean, a non-negative hop count, a
+string such as `"loopback"`, or an array of such strings, default `false`);
+set it when running behind a reverse proxy so client IP and login rate
+limiting are derived from `X-Forwarded-For`.
 
 Global rules apply independently of principal grants:
 

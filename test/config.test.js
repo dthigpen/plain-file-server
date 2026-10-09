@@ -50,7 +50,16 @@ test('configuration validates grant scopes, operations, and server limits', t =>
     [candidate => { candidate.rules.allowedExtensions = ['.txt', 1]; }, /allowedExtensions/],
     [candidate => { candidate.rules.allowedExtensions = ['*', '.txt']; }, /allowedExtensions/],
     [candidate => { candidate.rules.allowedExtensions = ['.*', '.txt']; }, /allowedExtensions/],
-    [candidate => { candidate.rules.allowedExtensions = ['.t*']; }, /allowedExtensions/]
+    [candidate => { candidate.rules.allowedExtensions = ['.t*']; }, /allowedExtensions/],
+    [candidate => { candidate.server.allowedOrigins = 'https://example.com'; }, /allowedOrigins/],
+    [candidate => { candidate.server.allowedOrigins = ['https://example.com', 1]; }, /allowedOrigins/],
+    [candidate => { candidate.server.allowedOrigins = ['']; }, /allowedOrigins/],
+    [candidate => { candidate.server.allowedOrigins = ['*', 'https://example.com']; }, /allowedOrigins/],
+    [candidate => { candidate.server.corsMaxAge = -1; }, /corsMaxAge/],
+    [candidate => { candidate.server.corsMaxAge = 1.5; }, /corsMaxAge/],
+    [candidate => { candidate.server.trustProxy = -1; }, /trustProxy/],
+    [candidate => { candidate.server.trustProxy = {}; }, /trustProxy/],
+    [candidate => { candidate.server.trustProxy = ['10.0.0.0/8', 5]; }, /trustProxy/]
   ];
 
   for (const [change, errorPattern] of invalidCases) {
@@ -58,6 +67,30 @@ test('configuration validates grant scopes, operations, and server limits', t =>
     change(invalidConfig);
     fs.writeFileSync(configPath, JSON.stringify(invalidConfig));
     assert.throws(() => loadConfig(configPath), errorPattern);
+  }
+});
+
+test('configuration accepts CORS and trust-proxy options', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-config-cors-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const configPath = path.join(root, 'config.json');
+
+  const accepted = [
+    { allowedOrigins: ['*'] },
+    { allowedOrigins: [] },
+    { allowedOrigins: ['https://app.example.com', 'https://host.tailnet.ts.net'] },
+    { corsMaxAge: 0 },
+    { trustProxy: true },
+    { trustProxy: 1 },
+    { trustProxy: 'loopback' },
+    { trustProxy: ['loopback', '10.0.0.0/8'] }
+  ];
+
+  for (const serverOverrides of accepted) {
+    const config = validConfig(root);
+    Object.assign(config.server, serverOverrides);
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    assert.doesNotThrow(() => loadConfig(configPath));
   }
 });
 

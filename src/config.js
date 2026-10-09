@@ -31,6 +31,22 @@ function resolveConfiguredDirectory(directory, name) {
   return path.resolve(directory);
 }
 
+function isValidTrustProxy(value) {
+  if (typeof value === 'boolean') {
+    return true;
+  }
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value >= 0;
+  }
+  if (typeof value === 'string') {
+    return value.length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 && value.every(entry => typeof entry === 'string' && entry.length > 0);
+  }
+  return false;
+}
+
 function validateConfig(cfg) {
   if (!cfg.server) {
     throw new Error('Missing server configuration');
@@ -79,6 +95,32 @@ function validateConfig(cfg) {
     (!Number.isInteger(cfg.server.reconcileIntervalMs) || cfg.server.reconcileIntervalMs < 100)
   ) {
     throw new Error('reconcileIntervalMs must be an integer of at least 100');
+  }
+
+  if (cfg.server.allowedOrigins !== undefined) {
+    if (
+      !Array.isArray(cfg.server.allowedOrigins) ||
+      cfg.server.allowedOrigins.some(origin => typeof origin !== 'string' || origin.length === 0)
+    ) {
+      throw new Error('allowedOrigins must be an array of non-empty strings');
+    }
+    if (
+      cfg.server.allowedOrigins.includes('*') &&
+      cfg.server.allowedOrigins.length !== 1
+    ) {
+      throw new Error('allowedOrigins must use "*" alone, or list specific origins');
+    }
+  }
+
+  if (cfg.server.corsMaxAge !== undefined &&
+    (!Number.isInteger(cfg.server.corsMaxAge) || cfg.server.corsMaxAge < 0)) {
+    throw new Error('corsMaxAge must be a non-negative integer');
+  }
+
+  if (cfg.server.trustProxy !== undefined && !isValidTrustProxy(cfg.server.trustProxy)) {
+    throw new Error(
+      'trustProxy must be a boolean, a non-negative integer, a non-empty string, or an array of non-empty strings'
+    );
   }
   
   if (!cfg.auth) {
