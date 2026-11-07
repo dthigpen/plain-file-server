@@ -15,7 +15,7 @@ const {
 } = require('../src/services/fileService');
 
 function createFileService(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-core-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-core-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const config = {
     server: {
@@ -181,7 +181,7 @@ test('failed history snapshot leaves no false version and reconciliation recover
 });
 
 test('atomic write failure preserves the prior destination and removes its temporary file', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-atomic-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-atomic-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const destination = path.join(root, 'file.txt');
   fs.writeFileSync(destination, 'original');
@@ -219,7 +219,7 @@ test('HTTP entity-tag comparison follows strong If-Match and weak If-None-Match 
 });
 
 test('history and storage directories may not overlap, including through symlinks', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-roots-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-roots-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const storageDir = path.join(root, 'documents');
   fs.mkdirSync(storageDir);

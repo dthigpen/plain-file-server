@@ -1,6 +1,6 @@
-# Plain File Server — Specification
+# Actual Files — Specification
 
-Plain File Server is a small, content-agnostic HTTP service for versioned text
+Actual Files is a small, content-agnostic HTTP service for versioned text
 documents stored as ordinary files on the host. Applications own document
 meaning and merge behavior; the server owns document paths, access control,
 current contents, immutable history, and optimistic concurrency.

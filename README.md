@@ -1,6 +1,6 @@
-# Plain File Server
+# Actual Files
 
-Plain File Server is a small, self-hosted backend for applications that store
+Actual Files is a small, self-hosted backend for applications that store
 data in ordinary files. It gives applications a simple HTTP API for accessing
 user-owned files, without requiring a proprietary database, cloud service, or
 storage format.
@@ -11,12 +11,12 @@ other software. Applications can be replaced without trapping their data.
 
 ## What and why
 
-In many apps, your data is tied to the app. Plain File Server keeps it in
+In many apps, your data is tied to the app. Actual Files keeps it in
 ordinary files instead, so you can switch apps without leaving your data
 behind:
 
 ```text
-Your apps  --HTTP-->  Plain File Server  -->  your files
+Your apps  --HTTP-->  Actual Files  -->  your files
 ```
 
 **One format, many apps:** a budget app can use `budget.txt`, a todo app
@@ -126,7 +126,7 @@ the server's production npm dependencies into the local image. It does not
 publish the image or require a GitHub Container Registry login.
 
 ```sh
-podman build -t localhost/plain-file-server:latest .
+podman build -t localhost/actual-files:latest .
 ```
 
 For an initial setup, provide persistent config, document, and history
@@ -141,7 +141,7 @@ podman run --rm -it \
   -v "$PWD/config:/config:Z" \
   -v "$PWD/data:/data:Z" \
   -v "$PWD/history:/history:Z" \
-  localhost/plain-file-server:latest \
+  localhost/actual-files:latest \
   npm run setup -- --config /config/config.json
 ```
 
@@ -159,7 +159,7 @@ curl http://127.0.0.1:3000/health
 If `podman compose` is unavailable, the Podman Compose provider is not
 installed; the direct `podman build` and `podman run` commands above do not
 require it. For Docker, build with
-`docker build -t localhost/plain-file-server:latest .` and use the equivalent
+`docker build -t localhost/actual-files:latest .` and use the equivalent
 Docker commands. In rootless Podman, run as the account that owns the
 persistent directories and preserve the `keep-id` user namespace so the
 image's `node` user can write to them.

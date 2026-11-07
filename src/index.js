@@ -98,7 +98,7 @@ function startServer(configPath = path.join(process.cwd(), 'config.json')) {
   reconcileTimer.unref();
 
   const server = app.listen(port, host, () => {
-    console.log(`Plain file server running on http://${host}:${port}`);
+    console.log(`Actual Files running on http://${host}:${port}`);
     console.log(`Storage directory: ${fileService.storageRoot}`);
   });
   server.on('close', () => clearTimeout(reconcileTimer));

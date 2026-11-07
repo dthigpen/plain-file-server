@@ -30,7 +30,7 @@ test('corsOriginOption maps config to cors origin behavior', async () => {
 });
 
 function buildApp(serverOverrides, t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-cors-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-cors-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const config = {
     server: {

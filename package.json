@@ -1,5 +1,5 @@
 {
-  "name": "plain-file-server",
+  "name": "actual-files",
   "version": "1.0.0",
   "description": "A content-agnostic REST API for versioned text documents",
   "main": "src/index.js",

@@ -52,7 +52,7 @@ function scriptedPrompt({ choices = [], lineAnswers = [], valueAnswers = [], con
 }
 
 function temporaryConfigPath(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-setup-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-setup-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return path.join(root, 'config.json');
 }

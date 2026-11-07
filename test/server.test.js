@@ -11,7 +11,7 @@ const { loadConfig } = require('../src/config');
 const { FileService } = require('../src/services/fileService');
 
 test('versioned document API reconciles files, guards paths, and authorizes operations', async t => {
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-server-'));
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-'));
   const storageDir = path.join(temporaryRoot, 'documents');
   const historyDir = path.join(temporaryRoot, 'history');
   fs.mkdirSync(path.join(storageDir, 'notes'), { recursive: true });
@@ -487,7 +487,7 @@ test('versioned document API reconciles files, guards paths, and authorizes oper
 });
 
 test('extension policies consistently filter listings and guard reads and writes', async t => {
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-extensions-'));
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-extensions-'));
   const storageDir = path.join(temporaryRoot, 'documents');
   const historyDir = path.join(temporaryRoot, 'history');
   fs.mkdirSync(storageDir, { recursive: true });

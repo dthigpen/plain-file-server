@@ -1,9 +1,9 @@
 services:
-  plain-file-server:
-    image: localhost/plain-file-server:latest
+  actual-files:
+    image: localhost/actual-files:latest
     build:
       context: .
-    container_name: plain-file-server
+    container_name: actual-files
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
     userns_mode: keep-id

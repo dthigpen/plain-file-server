@@ -30,7 +30,7 @@ function validConfig(root) {
 }
 
 test('configuration validates grant scopes, operations, and server limits', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-config-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-config-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const configPath = path.join(root, 'config.json');
   const config = validConfig(root);
@@ -71,7 +71,7 @@ test('configuration validates grant scopes, operations, and server limits', t =>
 });
 
 test('configuration accepts CORS and trust-proxy options', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-config-cors-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-config-cors-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const configPath = path.join(root, 'config.json');
 
@@ -95,7 +95,7 @@ test('configuration accepts CORS and trust-proxy options', t => {
 });
 
 test('configuration accepts the any-extension policies', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-config-extension-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-config-extension-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const configPath = path.join(root, 'config.json');
   for (const allowedExtensions of [['*'], ['.*'], []]) {
@@ -107,7 +107,7 @@ test('configuration accepts the any-extension policies', t => {
 });
 
 test('configuration expands home-directory paths for storage and history', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-config-home-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-config-home-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const configPath = path.join(root, 'config.json');
   const config = validConfig(root);
@@ -127,7 +127,7 @@ test('configuration expands home-directory paths for storage and history', t => 
 });
 
 test('configuration rejects ambiguous tilde-prefixed directory paths', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-config-home-invalid-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-config-home-invalid-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const configPath = path.join(root, 'config.json');
   const config = validConfig(root);
@@ -138,7 +138,7 @@ test('configuration rejects ambiguous tilde-prefixed directory paths', t => {
 });
 
 test('corrupt persisted history metadata fails explicitly instead of resetting history', t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plain-file-index-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-files-index-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const historyDir = path.join(root, 'history');
   fs.mkdirSync(historyDir);

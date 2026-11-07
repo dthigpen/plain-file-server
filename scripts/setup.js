@@ -127,7 +127,7 @@ function saveConfig(configPath, config) {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   const temporaryPath = path.join(
     path.dirname(destination),
-    `.plain-file-server-config-${process.pid}-${crypto.randomBytes(8).toString('hex')}`
+    `.actual-files-config-${process.pid}-${crypto.randomBytes(8).toString('hex')}`
   );
   let descriptor;
   try {
